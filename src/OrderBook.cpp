@@ -5,19 +5,97 @@
 namespace lob {
 
 std::vector<Trade> OrderBook::add_order(const Order& order) {
+    std::vector<Trade> trades;
+
     if (order.quantity <= 0) {
-        return {};
+        return trades;
     }
 
-    if (order.side == Side::Buy) {
-        bids_[order.price].push_back(order);
+    if (order_side_.find(order.id) != order_side_.end()) {
+        return trades;
+    }
+
+    Order remaining = order;
+
+    if (remaining.side == Side::Buy) {
+        while (remaining.quantity > 0 &&
+               !asks_.empty() &&
+               asks_.begin()->first <= remaining.price) {
+            auto level_it = asks_.begin();
+            auto& resting_orders = level_it->second;
+
+            while (remaining.quantity > 0 && !resting_orders.empty()) {
+                Order& resting = resting_orders.front();
+
+                Quantity trade_quantity = std::min(remaining.quantity, resting.quantity);
+
+                trades.push_back({
+                    resting.id,
+                    remaining.id,
+                    resting.price,
+                    trade_quantity,
+                    remaining.timestamp
+                });
+
+                remaining.quantity -= trade_quantity;
+                resting.quantity -= trade_quantity;
+
+                if (resting.quantity == 0) {
+                    order_side_.erase(resting.id);
+                    resting_orders.erase(resting_orders.begin());
+                }
+            }
+
+            if (resting_orders.empty()) {
+                asks_.erase(level_it);
+            }
+        }
+
+        if (remaining.quantity > 0) {
+            bids_[remaining.price].push_back(remaining);
+            order_side_[remaining.id] = remaining.side;
+        }
     } else {
-        asks_[order.price].push_back(order);
+        while (remaining.quantity > 0 &&
+               !bids_.empty() &&
+               bids_.begin()->first >= remaining.price) {
+            auto level_it = bids_.begin();
+            auto& resting_orders = level_it->second;
+
+            while (remaining.quantity > 0 && !resting_orders.empty()) {
+                Order& resting = resting_orders.front();
+
+                Quantity trade_quantity = std::min(remaining.quantity, resting.quantity);
+
+                trades.push_back({
+                    resting.id,
+                    remaining.id,
+                    resting.price,
+                    trade_quantity,
+                    remaining.timestamp
+                });
+
+                remaining.quantity -= trade_quantity;
+                resting.quantity -= trade_quantity;
+
+                if (resting.quantity == 0) {
+                    order_side_.erase(resting.id);
+                    resting_orders.erase(resting_orders.begin());
+                }
+            }
+
+            if (resting_orders.empty()) {
+                bids_.erase(level_it);
+            }
+        }
+
+        if (remaining.quantity > 0) {
+            asks_[remaining.price].push_back(remaining);
+            order_side_[remaining.id] = remaining.side;
+        }
     }
 
-    order_side_[order.id] = order.side;
-
-    return {};
+    return trades;
 }
 
 bool OrderBook::cancel_order(OrderId order_id) {

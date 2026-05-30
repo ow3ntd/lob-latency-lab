@@ -21,6 +21,21 @@ int main() {
         1000001000
     });
 
+    auto trades = book.add_order({
+        3,
+        lob::Side::Buy,
+        10060,
+        50,
+        1000002000
+    });
+
+    std::cout << "Trades generated: " << trades.size() << "\n";
+
+    for (const auto& trade : trades) {
+        std::cout << "Trade price: " << trade.price << "\n";
+        std::cout << "Trade quantity: " << trade.quantity << "\n";
+    }
+
     std::cout << "Order count: " << book.order_count() << "\n";
 
     if (auto bid = book.best_bid()) {
