@@ -28,3 +28,19 @@ Current behavior:
 I verified the demo with a buy order crossing a resting sell order. The program generated one trade at price 10060 with quantity 50.
 
 Next step: add unit tests for add, cancel, partial fill, full fill, and non-crossing orders.
+
+## 2026-05-29 — Correctness Tests Added
+
+Added unit-style correctness tests for the order book.
+
+Test coverage now includes:
+- adding non-crossing buy and sell orders
+- canceling an existing order
+- canceling a missing order
+- crossing buy partial fill
+- crossing buy full fill with remainder
+- crossing sell partial fill
+
+The tests are currently written with standard C++ `assert` statements so the project stays simple and easy to compile without external dependencies.
+
+Next step: add more edge-case tests, then add market data replay from CSV.
