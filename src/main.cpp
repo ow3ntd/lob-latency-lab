@@ -1,55 +1,38 @@
-#include "OrderBook.hpp"
+#include "MarketDataReplay.hpp"
 
+#include <fstream>
 #include <iostream>
 
 int main() {
-    lob::OrderBook book;
+    std::ifstream input("data/sample_orders.csv");
 
-    book.add_order({
-        1,
-        lob::Side::Buy,
-        10050,
-        200,
-        1000000000
-    });
-
-    book.add_order({
-        2,
-        lob::Side::Sell,
-        10060,
-        100,
-        1000001000
-    });
-
-    auto trades = book.add_order({
-        3,
-        lob::Side::Buy,
-        10060,
-        50,
-        1000002000
-    });
-
-    std::cout << "Trades generated: " << trades.size() << "\n";
-
-    for (const auto& trade : trades) {
-        std::cout << "Trade price: " << trade.price << "\n";
-        std::cout << "Trade quantity: " << trade.quantity << "\n";
+    if (!input) {
+        std::cerr << "Could not open data/sample_orders.csv\n";
+        return 1;
     }
 
+    lob::OrderBook book;
+    auto summary = lob::replay_market_data(input, book);
+
+    std::cout << "Events processed: " << summary.events_processed << "\n";
+    std::cout << "ADD events: " << summary.add_events << "\n";
+    std::cout << "CANCEL events: " << summary.cancel_events << "\n";
+    std::cout << "Successful cancels: " << summary.successful_cancels << "\n";
+    std::cout << "Trades generated: " << summary.trades_generated << "\n";
+    std::cout << "Total traded quantity: " << summary.total_traded_quantity << "\n";
     std::cout << "Order count: " << book.order_count() << "\n";
 
     if (auto bid = book.best_bid()) {
         std::cout << "Best bid: " << *bid << "\n";
+    } else {
+        std::cout << "Best bid: empty\n";
     }
 
     if (auto ask = book.best_ask()) {
         std::cout << "Best ask: " << *ask << "\n";
+    } else {
+        std::cout << "Best ask: empty\n";
     }
-
-    bool cancelled = book.cancel_order(1);
-
-    std::cout << "Cancelled order 1: " << std::boolalpha << cancelled << "\n";
-    std::cout << "Order count after cancel: " << book.order_count() << "\n";
 
     return 0;
 }
