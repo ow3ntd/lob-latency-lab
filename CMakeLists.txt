@@ -31,3 +31,9 @@ add_executable(test_market_data_replay
 )
 
 target_link_libraries(test_market_data_replay PRIVATE lob)
+
+add_executable(bench_order_book
+    benchmarks/bench_order_book.cpp
+)
+
+target_link_libraries(bench_order_book PRIVATE lob)
