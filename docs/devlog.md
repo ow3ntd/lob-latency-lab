@@ -44,3 +44,37 @@ Test coverage now includes:
 The tests are currently written with standard C++ `assert` statements so the project stays simple and easy to compile without external dependencies.
 
 Next step: add more edge-case tests, then add market data replay from CSV.
+
+## 2026-06-03 — CSV Market Data Replay Added
+
+Implemented CSV-based market data replay as a separate layer from the matching engine.
+
+New behavior:
+- reads ADD and CANCEL events from CSV input
+- converts BUY and SELL text values into order book events
+- replays events through the existing matching engine
+- reports processed event counts, successful cancellations, generated trades, and total traded quantity
+- supports in-memory replay tests using `std::istringstream`
+
+I kept replay parsing separate from `OrderBook.cpp` so the matching engine remains independent of the input format and easier to test.
+
+Verified sample replay:
+- 4 events processed
+- 3 add events
+- 1 cancel event
+- 1 generated trade
+- total traded quantity of 50
+- final remaining ask at price 10060
+
+Next step: add latency and throughput benchmarking for replayed order events.
+## 2026-06-04 — Benchmark Summary Added
+
+Added a benchmark report for the deterministic order book benchmark.
+
+The benchmark processes 1,000,000 synthetic events using a repeated add, match, and cancel pattern. The workload is generated in memory before timing starts so the benchmark measures order book processing rather than CSV parsing or file input.
+
+Across three runs, the benchmark processed approximately 24.5 million events per second, with an average processing cost of about 40.8 nanoseconds per event.
+
+I documented the benchmark design, build command, run command, results table, and measurement limitations in `results/benchmark_summary.md`.
+
+Next step: add an architecture diagram and improve the README so the project is easier for recruiters to understand quickly.
