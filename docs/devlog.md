@@ -78,3 +78,14 @@ Across three runs, the benchmark processed approximately 24.5 million events per
 I documented the benchmark design, build command, run command, results table, and measurement limitations in `results/benchmark_summary.md`.
 
 Next step: add an architecture diagram and improve the README so the project is easier for recruiters to understand quickly.
+## 2026-06-04 — Benchmark Summary Added
+
+Added a benchmark report for the deterministic order book benchmark.
+
+The benchmark processes 1,000,000 synthetic events using a repeated add, match, and cancel pattern. The workload is generated in memory before timing starts so the benchmark measures order book processing rather than CSV parsing or file input.
+
+Across three runs, the benchmark processed approximately 24.5 million events per second, with an average processing cost of about 40.8 nanoseconds per event.
+
+I documented the benchmark design, build command, run command, results table, and measurement limitations in `results/benchmark_summary.md`.
+
+Next step: add an architecture diagram and improve the README so the project is easier for recruiters to understand quickly.
