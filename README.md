@@ -6,6 +6,59 @@ A C++ limit order book and matching engine focused on correctness, clean systems
 
 This project implements the core infrastructure behind a simplified electronic exchange. Rather than building a trading strategy or price predictor, it focuses on the systems layer: order handling, matching logic, trade generation, testing, and eventually latency benchmarking.
 
+## Architecture
+
+```text
+data/sample_orders.csv
+        │
+        ▼
+MarketDataReplay.cpp
+        │
+        ▼
+OrderBook.cpp
+        │
+        ├── add_order(...)
+        ├── cancel_order(...)
+        ├── best_bid()
+        └── best_ask()
+        │
+        ▼
+Trades + ReplaySummary
+
+
+benchmarks/bench_order_book.cpp
+        │
+        ▼
+Synthetic in-memory order events
+        │
+        ▼
+OrderBook.cpp
+        │
+        ▼
+Throughput metrics
+```
+
+The project separates input handling from matching logic:
+
+- `MarketDataReplay.cpp` handles CSV parsing and replay.
+- `OrderBook.cpp` handles order storage, cancellation, matching, and trade generation.
+- `bench_order_book.cpp` measures aggregate throughput without CSV parsing or console printing inside the timed loop.
+
+## Benchmark Snapshot
+
+The current deterministic benchmark processes 1,000,000 synthetic order events using a repeated add, match, and cancel pattern.
+
+Across three local runs, the order book processed approximately:
+
+- **24.5 million events per second**
+- **40.8 nanoseconds per event**
+- **250,000 trades generated per 1,000,000 events**
+
+Full methodology and limitations are documented in:
+
+```text
+results/benchmark_summary.md
+
 ## Current Features
 
 - Buy and sell limit order support
