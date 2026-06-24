@@ -89,3 +89,24 @@ Across three runs, the benchmark processed approximately 24.5 million events per
 I documented the benchmark design, build command, run command, results table, and measurement limitations in `results/benchmark_summary.md`.
 
 Next step: add an architecture diagram and improve the README so the project is easier for recruiters to understand quickly.
+
+## 2026-06-23 — Cancellation Optimization Experiment Reverted
+
+Tested a cancellation-path optimization that replaced vector-backed price levels with list-backed price levels and direct order-location indexing.
+
+The goal was to avoid scanning through price levels during cancellation.
+
+Benchmark results showed the change made the current workload slower:
+
+- baseline throughput: approximately 24.5M events/sec
+- experimental throughput: approximately 15.6M events/sec
+- baseline p50 latency: 42 ns
+- experimental p50 latency: 83 ns
+- baseline p99 latency: 84 ns
+- experimental p99 latency: 125 ns
+
+The likely cause is that `std::list` introduced worse cache locality and allocation/pointer-chasing overhead. In the current benchmark, the book stays small and bounded, so the original vector-backed scan is cheaper than the list-based direct-cancel approach.
+
+I reverted the experiment and kept the faster baseline implementation.
+
+Next step: create a deeper-book benchmark before attempting future cancellation optimizations.
