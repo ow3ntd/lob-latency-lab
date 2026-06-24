@@ -43,3 +43,9 @@ add_executable(bench_order_book_latency
 )
 
 target_link_libraries(bench_order_book_latency PRIVATE lob)
+
+add_executable(bench_deep_order_book
+    benchmarks/bench_deep_order_book.cpp
+)
+
+target_link_libraries(bench_deep_order_book PRIVATE lob)

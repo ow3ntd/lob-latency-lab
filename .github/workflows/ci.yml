@@ -44,6 +44,12 @@ jobs:
             benchmarks/bench_order_book_latency.cpp src/OrderBook.cpp src/MatchingEngine.cpp \
             -o build/bench_order_book_latency
 
+      - name: Build deep order book benchmark runner
+        run: |
+          clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
+            benchmarks/bench_deep_order_book.cpp src/OrderBook.cpp src/MatchingEngine.cpp \
+            -o build/bench_deep_order_book
+
       - name: Run order book tests
         run: ./build/test_order_book
 
@@ -55,3 +61,6 @@ jobs:
 
       - name: Smoke test latency benchmark runner
         run: ./build/bench_order_book_latency 1000
+
+      - name: Smoke test deep order book benchmark runner
+        run: ./build/bench_deep_order_book 1000
