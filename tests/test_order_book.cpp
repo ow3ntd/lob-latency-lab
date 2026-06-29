@@ -38,6 +38,59 @@ void test_cancel_missing_order() {
 
     assert(!cancelled);
     assert(book.order_count() == 0);
+    assert(!book.best_bid().has_value());
+    assert(!book.best_ask().has_value());
+}
+
+void test_cancel_missing_order_does_not_change_book() {
+    lob::OrderBook book;
+
+    auto trades = book.add_order({1, lob::Side::Buy, 10050, 200, 1000});
+    bool cancelled = book.cancel_order(999);
+
+    assert(trades.empty());
+    assert(!cancelled);
+    assert(book.order_count() == 1);
+    assert(book.best_bid().has_value());
+    assert(*book.best_bid() == 10050);
+    assert(!book.best_ask().has_value());
+}
+
+void test_cancel_already_filled_order() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Sell, 10060, 100, 1000});
+
+    auto fill_trades = book.add_order({2, lob::Side::Buy, 10060, 100, 1001});
+    bool cancelled = book.cancel_order(1);
+
+    assert(fill_trades.size() == 1);
+    assert(fill_trades[0].resting_order_id == 1);
+    assert(fill_trades[0].quantity == 100);
+    assert(!cancelled);
+    assert(book.order_count() == 0);
+    assert(!book.best_bid().has_value());
+    assert(!book.best_ask().has_value());
+}
+
+void test_empty_book_best_prices() {
+    lob::OrderBook book;
+
+    assert(!book.best_bid().has_value());
+    assert(!book.best_ask().has_value());
+    assert(book.order_count() == 0);
+}
+
+void test_order_rests_when_opposite_side_empty() {
+    lob::OrderBook book;
+
+    auto trades = book.add_order({1, lob::Side::Buy, 10050, 200, 1000});
+
+    assert(trades.empty());
+    assert(book.order_count() == 1);
+    assert(book.best_bid().has_value());
+    assert(*book.best_bid() == 10050);
+    assert(!book.best_ask().has_value());
 }
 
 void test_crossing_buy_partial_fill() {
@@ -93,13 +146,74 @@ void test_crossing_sell_partial_fill() {
     assert(*book.best_bid() == 10050);
 }
 
+void test_partial_fill_keeps_positive_resting_quantity() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Sell, 10060, 100, 1000});
+
+    auto partial_trades = book.add_order({2, lob::Side::Buy, 10060, 40, 1001});
+    auto remaining_trades = book.add_order({3, lob::Side::Buy, 10060, 60, 1002});
+
+    assert(partial_trades.size() == 1);
+    assert(partial_trades[0].quantity == 40);
+    assert(remaining_trades.size() == 1);
+    assert(remaining_trades[0].resting_order_id == 1);
+    assert(remaining_trades[0].quantity == 60);
+    assert(book.order_count() == 0);
+    assert(!book.best_ask().has_value());
+}
+
+void test_full_fill_leaves_no_negative_resting_quantity() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 75, 1000});
+
+    auto fill_trades = book.add_order({2, lob::Side::Sell, 10050, 75, 1001});
+
+    assert(fill_trades.size() == 1);
+    assert(fill_trades[0].quantity == 75);
+    assert(book.order_count() == 0);
+    assert(!book.best_bid().has_value());
+
+    auto later_trades = book.add_order({3, lob::Side::Sell, 10050, 1, 1002});
+
+    assert(later_trades.empty());
+    assert(book.order_count() == 1);
+    assert(book.best_ask().has_value());
+    assert(*book.best_ask() == 10050);
+}
+
+void test_basic_volume_conservation_with_remainder() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Sell, 10060, 100, 1000});
+
+    auto trades = book.add_order({2, lob::Side::Buy, 10060, 150, 1001});
+    auto remainder_trades = book.add_order({3, lob::Side::Sell, 10060, 50, 1002});
+
+    assert(trades.size() == 1);
+    assert(trades[0].quantity == 100);
+    assert(remainder_trades.size() == 1);
+    assert(remainder_trades[0].resting_order_id == 2);
+    assert(remainder_trades[0].quantity == 50);
+    assert(trades[0].quantity + remainder_trades[0].quantity == 150);
+    assert(book.order_count() == 0);
+}
+
 int main() {
     test_add_non_crossing_orders();
     test_cancel_existing_order();
     test_cancel_missing_order();
+    test_cancel_missing_order_does_not_change_book();
+    test_cancel_already_filled_order();
+    test_empty_book_best_prices();
+    test_order_rests_when_opposite_side_empty();
     test_crossing_buy_partial_fill();
     test_crossing_buy_full_fill_with_remainder();
     test_crossing_sell_partial_fill();
+    test_partial_fill_keeps_positive_resting_quantity();
+    test_full_fill_leaves_no_negative_resting_quantity();
+    test_basic_volume_conservation_with_remainder();
 
     std::cout << "All order book tests passed.\n";
 
