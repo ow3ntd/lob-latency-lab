@@ -1,132 +1,126 @@
 # lob-latency-lab
 
-A C++ limit order book and matching engine focused on correctness, clean systems design, and measurable performance.
+A C++20 limit order book and matching engine focused on correctness, clean systems design, and measured latency/throughput tradeoffs.
 
-## Project Purpose
+## Why This Exists
 
-This project implements the core infrastructure behind a simplified electronic exchange. Rather than building a trading strategy or price predictor, it focuses on the systems layer: order handling, matching logic, trade generation, testing, and eventually latency benchmarking.
-
-## Architecture
-
-```text
-data/sample_orders.csv
-        │
-        ▼
-MarketDataReplay.cpp
-        │
-        ▼
-OrderBook.cpp
-        │
-        ├── add_order(...)
-        ├── cancel_order(...)
-        ├── best_bid()
-        └── best_ask()
-        │
-        ▼
-Trades + ReplaySummary
-
-
-benchmarks/bench_order_book.cpp
-        │
-        ▼
-Synthetic in-memory order events
-        │
-        ▼
-OrderBook.cpp
-        │
-        ▼
-Throughput metrics
-```
-
-The project separates input handling from matching logic:
-
-- `MarketDataReplay.cpp` handles CSV parsing and replay.
-- `OrderBook.cpp` handles order storage, cancellation, matching, and trade generation.
-- `bench_order_book.cpp` measures aggregate throughput without CSV parsing or console printing inside the timed loop.
-
-## Benchmark Snapshot
-
-The current deterministic benchmark processes 1,000,000 synthetic order events using a repeated add, match, and cancel pattern.
-
-Across three local runs, the order book processed approximately:
-
-- **24.5 million events per second**
-- **40.8 nanoseconds per event**
-- **250,000 trades generated per 1,000,000 events**
-
-Full methodology and limitations are documented in:
-
-```text
-results/benchmark_summary.md
+This project is a small systems lab for the core mechanics behind an electronic exchange: order storage, cancellation, matching, trade generation, replay, testing, and benchmarking. It is intentionally scoped to market-structure infrastructure rather than trading strategy or price prediction.
 
 ## Current Features
 
 - Buy and sell limit order support
+- Integer price ticks for deterministic price comparisons
 - Best bid and best ask tracking
 - Order cancellation by order identifier
 - Crossing-order matching
 - Partial and full fill handling
 - Trade event generation
-- Correctness tests for core order book behavior
+- CSV market data replay separated from matching logic
+- Assert-based correctness tests
+- Throughput, latency, and deeper-book benchmark scenarios
 
-## Example Matching Scenario
+## Architecture
 
 ```text
-Resting order:   SELL 100 @ 10060
-Incoming order: BUY   50 @ 10060
-
-Result:
-TRADE price=10060 quantity=50
-Remaining ask: SELL 50 @ 10060
+data/sample_orders.csv
+        |
+        v
+MarketDataReplay
+        |
+        v
+OrderBook
+        |-- add_order(...)
+        |-- cancel_order(...)
+        |-- best_bid()
+        |-- best_ask()
+        v
+Trades + ReplaySummary
 ```
 
-## Current Roadmap
+```text
+Synthetic benchmark events
+        |
+        v
+OrderBook
+        |
+        v
+Throughput / latency metrics
+```
 
-- [x] Define order and trade types
-- [x] Implement baseline order book operations
-- [x] Implement basic matching logic
-- [x] Add correctness tests
-- [ ] Add comma-separated value market data replay
-- [ ] Add latency benchmark runner
-- [ ] Add benchmark report
-- [ ] Add architecture diagram
+Key implementation boundaries:
 
-## Running Tests
+- `OrderBook` owns order storage, cancellation, matching, and best-price queries.
+- `MarketDataReplay` owns CSV parsing and replay so input handling stays independent from matching logic.
+- Benchmark programs generate in-memory events to avoid measuring CSV parsing or console output in the timed path.
 
-The project currently uses simple C++ `assert`-based correctness tests with no external testing framework.
+## Benchmark Snapshot
+
+Local benchmark snapshot:
+
+| Scenario | Throughput | Average cost | Latency |
+| --- | ---: | ---: | ---: |
+| Small book throughput | ~24.5 million events/sec | ~40.8 ns/event | Not measured in throughput loop |
+| Small book latency | Separate per-event timing run | Not primary metric | p50 42 ns, p99 84 ns |
+| Deep book throughput | ~178K events/sec | ~5,624.72 ns/event | Not measured in throughput loop |
+
+Detailed methodology and historical notes live in:
+
+- `results/benchmark_summary.md`
+- `results/latency_benchmark_summary.md`
+- `results/deep_book_benchmark_summary.md`
+- `results/performance_history.md`
+
+## Build And Run Tests
+
+The project uses CMake and simple `assert`-based tests.
 
 ```bash
-mkdir -p build
-
-clang++ -std=c++20 -Iinclude \
-  tests/test_order_book.cpp src/OrderBook.cpp src/MatchingEngine.cpp \
-  -o build/test_order_book
+cmake -S . -B build
+cmake --build build
 
 ./build/test_order_book
+./build/test_market_data_replay
 ```
 
-Expected output:
+Expected test output includes:
 
 ```text
 All order book tests passed.
+All market data replay tests passed.
 ```
 
-## Current Test Coverage
+## Run Benchmarks
 
-The order book tests currently cover:
+```bash
+cmake --build build --target bench_order_book
+cmake --build build --target bench_order_book_latency
+cmake --build build --target bench_deep_order_book
 
-- adding non-crossing buy and sell orders
-- canceling an existing order
-- canceling a missing order
-- crossing buy partial fill
-- crossing buy full fill with remainder
-- crossing sell partial fill
+./build/bench_order_book
+./build/bench_order_book_latency
+./build/bench_deep_order_book
+```
 
-## Current Matching Behavior
+## Key Engineering Lessons
 
-The order book now generates trades when incoming orders cross resting orders:
+- Integer price ticks avoid floating-point price comparison issues.
+- CSV replay is separated from matching logic so input parsing is independent from the order book.
+- Throughput and per-event latency are benchmarked separately because timing every event adds overhead.
+- A list-based direct-cancel experiment was reverted after benchmarks showed worse performance due to cache locality and allocation/pointer-chasing costs.
+- A deeper-book benchmark was added to stress larger book states beyond the small deterministic benchmark.
 
-- an incoming buy order matches when its price is greater than or equal to the best ask
-- an incoming sell order matches when its price is less than or equal to the best bid
-- partially filled resting orders remain in the book
-- fully filled resting orders are removed from the book
+## Limitations
+
+- This is a simplified educational order book, not a production trading system.
+- Matching is single-threaded.
+- Order types are limited to basic limit orders and cancellations.
+- Persistence, networking, risk checks, and exchange connectivity are out of scope.
+- Benchmarks are local measurements and should be interpreted with the documented methodology.
+
+## Roadmap
+
+- Expand correctness and invariant tests around edge cases.
+- Add broader replay scenarios and malformed-input coverage.
+- Compare alternative data structures under both small-book and deep-book workloads.
+- Track benchmark results over time as implementation details change.
+- Add clearer architecture notes for design tradeoffs and benchmark interpretation.
