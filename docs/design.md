@@ -68,3 +68,28 @@ The first version should be simple and correct. Optimization will come only afte
 - Cancel missing order
 - Best bid updates after cancellation
 - Best ask updates after fill
+
+## Correctness Philosophy
+
+For a matching engine, correctness matters before speed. The current tests focus on core order book behavior such as adding orders, canceling orders, matching crossing orders, and preserving remaining quantity after partial fills.
+
+Planned correctness improvements include:
+
+* FIFO matching for orders resting at the same price
+* Best-price priority across multiple price levels
+* Deterministic replay checks
+* Cancel behavior for already-filled or missing orders
+* Quantity invariants to prevent negative resting or traded quantity
+* Basic volume conservation checks across submitted, filled, canceled, and resting quantity
+
+
+## Current Matching Behavior
+
+The order book now generates trades when incoming orders cross resting orders:
+
+- an incoming buy order matches when its price is greater than or equal to the best ask
+- an incoming sell order matches when its price is less than or equal to the best bid
+- partially filled resting orders remain in the book
+- fully filled resting orders are removed from the book
+
+
