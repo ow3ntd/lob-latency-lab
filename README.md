@@ -142,7 +142,7 @@ The project currently uses simple C++ `assert`-based correctness tests with no e
 mkdir -p build
 
 clang++ -std=c++20 -Iinclude \
-  tests/test_order_book.cpp src/OrderBook.cpp src/MatchingEngine.cpp \
+  src/OrderBook.cpp \
   -o build/test_order_book
 
 ./build/test_order_book
