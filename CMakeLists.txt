@@ -8,7 +8,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(lob
     src/OrderBook.cpp
-    src/MatchingEngine.cpp
     src/MarketDataReplay.cpp
 )
 
