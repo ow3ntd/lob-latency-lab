@@ -4,6 +4,57 @@
 
 namespace lob {
 
+std::size_t OrderBook::allocate_slot(const Order& order) {
+    if (!free_slots_.empty()) {
+        std::size_t index = free_slots_.back();
+        free_slots_.pop_back();
+        pool_[index] = {order, kInvalid, kInvalid};
+        return index;
+    }
+
+    pool_.push_back({order, kInvalid, kInvalid});
+    return pool_.size() - 1;
+}
+
+void OrderBook::free_slot(std::size_t index) {
+    free_slots_.push_back(index);
+}
+
+void OrderBook::append_to_level(PriceLevel& level, std::size_t index) {
+    OrderNode& node = pool_[index];
+    node.prev = level.tail;
+    node.next = kInvalid;
+
+    if (level.tail != kInvalid) {
+        pool_[level.tail].next = index;
+    } else {
+        level.head = index;
+    }
+
+    level.tail = index;
+    ++level.count;
+}
+
+void OrderBook::unlink_from_level(PriceLevel& level, std::size_t index) {
+    OrderNode& node = pool_[index];
+
+    if (node.prev != kInvalid) {
+        pool_[node.prev].next = node.next;
+    } else {
+        level.head = node.next;
+    }
+
+    if (node.next != kInvalid) {
+        pool_[node.next].prev = node.prev;
+    } else {
+        level.tail = node.prev;
+    }
+
+    node.prev = kInvalid;
+    node.next = kInvalid;
+    --level.count;
+}
+
 std::vector<Trade> OrderBook::add_order(const Order& order) {
     std::vector<Trade> trades;
 
@@ -11,7 +62,7 @@ std::vector<Trade> OrderBook::add_order(const Order& order) {
         return trades;
     }
 
-    if (order_side_.find(order.id) != order_side_.end()) {
+    if (order_location_.find(order.id) != order_location_.end()) {
         return trades;
     }
 
@@ -22,10 +73,11 @@ std::vector<Trade> OrderBook::add_order(const Order& order) {
                !asks_.empty() &&
                asks_.begin()->first <= remaining.price) {
             auto level_it = asks_.begin();
-            auto& resting_orders = level_it->second;
+            auto& level = level_it->second;
+            std::size_t current = level.head;
 
-            while (remaining.quantity > 0 && !resting_orders.empty()) {
-                Order& resting = resting_orders.front();
+            while (remaining.quantity > 0 && current != kInvalid) {
+                Order& resting = pool_[current].order;
 
                 Quantity trade_quantity = std::min(remaining.quantity, resting.quantity);
 
@@ -41,29 +93,35 @@ std::vector<Trade> OrderBook::add_order(const Order& order) {
                 resting.quantity -= trade_quantity;
 
                 if (resting.quantity == 0) {
-                    order_side_.erase(resting.id);
-                    resting_orders.erase(resting_orders.begin());
+                    OrderId filled_order_id = resting.id;
+                    std::size_t next = pool_[current].next;
+                    unlink_from_level(level, current);
+                    free_slot(current);
+                    order_location_.erase(filled_order_id);
+                    current = next;
                 }
             }
 
-            if (resting_orders.empty()) {
+            if (level.count == 0) {
                 asks_.erase(level_it);
             }
         }
 
         if (remaining.quantity > 0) {
-            bids_[remaining.price].push_back(remaining);
-            order_side_[remaining.id] = remaining.side;
+            std::size_t index = allocate_slot(remaining);
+            append_to_level(bids_[remaining.price], index);
+            order_location_[remaining.id] = index;
         }
     } else {
         while (remaining.quantity > 0 &&
                !bids_.empty() &&
                bids_.begin()->first >= remaining.price) {
             auto level_it = bids_.begin();
-            auto& resting_orders = level_it->second;
+            auto& level = level_it->second;
+            std::size_t current = level.head;
 
-            while (remaining.quantity > 0 && !resting_orders.empty()) {
-                Order& resting = resting_orders.front();
+            while (remaining.quantity > 0 && current != kInvalid) {
+                Order& resting = pool_[current].order;
 
                 Quantity trade_quantity = std::min(remaining.quantity, resting.quantity);
 
@@ -79,19 +137,24 @@ std::vector<Trade> OrderBook::add_order(const Order& order) {
                 resting.quantity -= trade_quantity;
 
                 if (resting.quantity == 0) {
-                    order_side_.erase(resting.id);
-                    resting_orders.erase(resting_orders.begin());
+                    OrderId filled_order_id = resting.id;
+                    std::size_t next = pool_[current].next;
+                    unlink_from_level(level, current);
+                    free_slot(current);
+                    order_location_.erase(filled_order_id);
+                    current = next;
                 }
             }
 
-            if (resting_orders.empty()) {
+            if (level.count == 0) {
                 bids_.erase(level_it);
             }
         }
 
         if (remaining.quantity > 0) {
-            asks_[remaining.price].push_back(remaining);
-            order_side_[remaining.id] = remaining.side;
+            std::size_t index = allocate_slot(remaining);
+            append_to_level(asks_[remaining.price], index);
+            order_location_[remaining.id] = index;
         }
     }
 
@@ -99,51 +162,46 @@ std::vector<Trade> OrderBook::add_order(const Order& order) {
 }
 
 bool OrderBook::cancel_order(OrderId order_id) {
-    auto side_it = order_side_.find(order_id);
+    auto location_it = order_location_.find(order_id);
 
-    if (side_it == order_side_.end()) {
+    if (location_it == order_location_.end()) {
         return false;
     }
 
-    auto erase_from_book = [order_id](auto& book) {
-        for (auto level_it = book.begin(); level_it != book.end(); ++level_it) {
-            auto& orders = level_it->second;
+    std::size_t index = location_it->second;
+    const Order& order = pool_[index].order;
 
-            auto order_it = std::find_if(
-                orders.begin(),
-                orders.end(),
-                [order_id](const Order& order) {
-                    return order.id == order_id;
-                }
-            );
+    if (order.side == Side::Buy) {
+        auto level_it = bids_.find(order.price);
 
-            if (order_it != orders.end()) {
-                orders.erase(order_it);
-
-                if (orders.empty()) {
-                    book.erase(level_it);
-                }
-
-                return true;
-            }
+        if (level_it == bids_.end()) {
+            return false;
         }
 
-        return false;
-    };
+        unlink_from_level(level_it->second, index);
+        free_slot(index);
+        order_location_.erase(location_it);
 
-    bool removed = false;
-
-    if (side_it->second == Side::Buy) {
-        removed = erase_from_book(bids_);
+        if (level_it->second.count == 0) {
+            bids_.erase(level_it);
+        }
     } else {
-        removed = erase_from_book(asks_);
+        auto level_it = asks_.find(order.price);
+
+        if (level_it == asks_.end()) {
+            return false;
+        }
+
+        unlink_from_level(level_it->second, index);
+        free_slot(index);
+        order_location_.erase(location_it);
+
+        if (level_it->second.count == 0) {
+            asks_.erase(level_it);
+        }
     }
 
-    if (removed) {
-        order_side_.erase(side_it);
-    }
-
-    return removed;
+    return true;
 }
 
 std::optional<Price> OrderBook::best_bid() const {
@@ -163,7 +221,7 @@ std::optional<Price> OrderBook::best_ask() const {
 }
 
 std::size_t OrderBook::order_count() const {
-    return order_side_.size();
+    return order_location_.size();
 }
 
 }  // namespace lob
