@@ -29,7 +29,7 @@ This keeps the order book size bounded while exercising:
 
 ```bash
 clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
-  benchmarks/bench_order_book.cpp src/OrderBook.cpp src/MatchingEngine.cpp \
+  benchmarks/bench_order_book.cpp src/OrderBook.cpp \
   -o build/bench_order_book
 ```
 
