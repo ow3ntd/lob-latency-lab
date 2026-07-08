@@ -200,6 +200,90 @@ void test_basic_volume_conservation_with_remainder() {
     assert(book.order_count() == 0);
 }
 
+void test_cancel_middle_order_preserves_fifo() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10050, 10, 1001});
+    book.add_order({3, lob::Side::Buy, 10050, 10, 1002});
+
+    bool cancelled = book.cancel_order(2);
+
+    assert(cancelled);
+    assert(book.order_count() == 2);
+
+    auto trades = book.add_order({100, lob::Side::Sell, 10050, 15, 1003});
+
+    assert(trades.size() == 2);
+    assert(trades[0].resting_order_id == 1);
+    assert(trades[0].quantity == 10);
+    assert(trades[1].resting_order_id == 3);
+    assert(trades[1].quantity == 5);
+}
+
+void test_cancel_head_order_advances_correctly() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10050, 10, 1001});
+
+    bool cancelled = book.cancel_order(1);
+
+    assert(cancelled);
+
+    auto trades = book.add_order({100, lob::Side::Sell, 10050, 5, 1002});
+
+    assert(trades.size() == 1);
+    assert(trades[0].resting_order_id == 2);
+}
+
+void test_cancel_tail_order() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10050, 10, 1001});
+
+    bool cancelled = book.cancel_order(2);
+
+    assert(cancelled);
+    assert(book.best_bid().has_value());
+    assert(*book.best_bid() == 10050);
+    assert(book.order_count() == 1);
+}
+
+void test_cancel_only_order_removes_price_level() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+
+    bool cancelled = book.cancel_order(1);
+
+    assert(cancelled);
+    assert(!book.best_bid().has_value());
+    assert(book.order_count() == 0);
+}
+
+void test_slot_reuse_after_heavy_cancel_churn() {
+    lob::OrderBook book;
+
+    for (int i = 0; i < 1000; ++i) {
+        book.add_order({static_cast<lob::OrderId>(i), lob::Side::Buy, 10050, 10, static_cast<lob::Timestamp>(i)});
+        book.cancel_order(static_cast<lob::OrderId>(i));
+    }
+
+    assert(book.order_count() == 0);
+    assert(!book.best_bid().has_value());
+
+    book.add_order({9001, lob::Side::Buy, 10050, 5, 1000});
+    book.add_order({9002, lob::Side::Buy, 10050, 5, 1001});
+
+    auto trades = book.add_order({9003, lob::Side::Sell, 10050, 10, 1002});
+
+    assert(trades.size() == 2);
+    assert(trades[0].resting_order_id == 9001);
+    assert(trades[1].resting_order_id == 9002);
+}
+
 int main() {
     test_add_non_crossing_orders();
     test_cancel_existing_order();
@@ -214,6 +298,11 @@ int main() {
     test_partial_fill_keeps_positive_resting_quantity();
     test_full_fill_leaves_no_negative_resting_quantity();
     test_basic_volume_conservation_with_remainder();
+    test_cancel_middle_order_preserves_fifo();
+    test_cancel_head_order_advances_correctly();
+    test_cancel_tail_order();
+    test_cancel_only_order_removes_price_level();
+    test_slot_reuse_after_heavy_cancel_churn();
 
     std::cout << "All order book tests passed.\n";
 
