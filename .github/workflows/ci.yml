@@ -24,28 +24,37 @@ jobs:
           mkdir -p build
           clang++ -std=c++20 -Iinclude \
             tests/test_order_book.cpp src/OrderBook.cpp src/MarketDataReplay.cpp \
+            -o build/test_order_book
 
       - name: Build market data replay tests
         run: |
           clang++ -std=c++20 -Iinclude \
             tests/test_market_data_replay.cpp src/OrderBook.cpp src/MarketDataReplay.cpp \
-
- 
+            -o build/test_market_data_replay
 
       - name: Build benchmark runner
         run: |
           clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
             benchmarks/bench_order_book.cpp src/OrderBook.cpp \
+            -o build/bench_order_book
 
       - name: Build latency benchmark runner
         run: |
           clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
             benchmarks/bench_order_book_latency.cpp src/OrderBook.cpp \
+            -o build/bench_order_book_latency
 
       - name: Build deep order book benchmark runner
         run: |
           clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
             benchmarks/bench_deep_order_book.cpp src/OrderBook.cpp \
+            -o build/bench_deep_order_book
+
+      - name: Build cancel stress benchmark runner
+        run: |
+          clang++ -std=c++20 -O3 -DNDEBUG -Iinclude \
+            benchmarks/bench_cancel_stress.cpp src/OrderBook.cpp \
+            -o build/bench_cancel_stress
 
       - name: Run order book tests
         run: ./build/test_order_book
@@ -61,3 +70,6 @@ jobs:
 
       - name: Smoke test deep order book benchmark runner
         run: ./build/bench_deep_order_book 1000
+
+      - name: Smoke test cancel stress benchmark runner
+        run: ./build/bench_cancel_stress 1000
