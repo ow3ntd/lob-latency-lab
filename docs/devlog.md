@@ -67,17 +67,7 @@ Verified sample replay:
 - final remaining ask at price 10060
 
 Next step: add latency and throughput benchmarking for replayed order events.
-## 2026-06-04 — Benchmark Summary Added
 
-Added a benchmark report for the deterministic order book benchmark.
-
-The benchmark processes 1,000,000 synthetic events using a repeated add, match, and cancel pattern. The workload is generated in memory before timing starts so the benchmark measures order book processing rather than CSV parsing or file input.
-
-Across three runs, the benchmark processed approximately 24.5 million events per second, with an average processing cost of about 40.8 nanoseconds per event.
-
-I documented the benchmark design, build command, run command, results table, and measurement limitations in `results/benchmark_summary.md`.
-
-Next step: add an architecture diagram and improve the README so the project is easier for recruiters to understand quickly.
 ## 2026-06-04 — Benchmark Summary Added
 
 Added a benchmark report for the deterministic order book benchmark.
@@ -110,3 +100,37 @@ The likely cause is that `std::list` introduced worse cache locality and allocat
 I reverted the experiment and kept the faster baseline implementation.
 
 Next step: create a deeper-book benchmark before attempting future cancellation optimizations.
+
+## 2026-07-07 — O(1) Cancellation via Slot-Pool Linked List
+
+Revisited cancellation, this time diagnosing why the earlier `std::list` attempt failed instead of concluding that direct-index cancellation was itself the problem.
+
+The June 23 experiment was slower not because avoiding the scan was wrong, but because `std::list` allocates every node separately on the heap, which destroys cache locality on the matching hot path. The fix is to get the O(1) unlink without the per-node allocation.
+
+I replaced the vector-backed price levels with an intrusive doubly-linked list stored in a single contiguous slot pool:
+- each price level holds head, tail, and count indices instead of a `std::vector<Order>`
+- orders live in one `std::vector<OrderNode>`, where each node stores its order plus prev and next as indices into that same vector rather than heap pointers
+- a free-list of released slot indices lets cancelled slots be reused without ever calling `new`
+- an `order_id -> slot index` hash map gives direct lookup, so cancellation unlinks the node in place with no scan and no element shifting
+
+Because the nodes live in one contiguous array instead of scattered heap allocations, this keeps most of the cache locality that made the original vector fast, while making cancellation independent of book depth. This is the key difference from the reverted `std::list` version.
+
+To actually measure the change I added a dedicated cancel-stress benchmark (`benchmarks/bench_cancel_stress.cpp`). The general-purpose throughput benchmark only makes one in four events a cancel and keeps the book small, so it dilutes the cancellation cost and could not isolate this. The stress benchmark rests N orders at one price level and cancels all of them front-to-back, which is the worst case for a position-shifting cancel.
+
+Measured cancellation cost per operation, same benchmark on both implementations, `-O3 -DNDEBUG`:
+
+| Orders | Old vector cancel (ns) | New slot-pool cancel (ns) |
+|---:|---:|---:|
+| 5,000 | ~1,960 | ~29 |
+| 10,000 | ~3,953 | ~24 |
+| 20,000 | ~7,923 | ~25 |
+| 40,000 | ~15,858 | ~27 |
+| 80,000 | ~46,703 | ~26 |
+
+The old implementation's per-cancel cost roughly doubles each time the order count doubles, which is the expected O(n) signature. The new implementation stays flat at roughly 25-29 ns regardless of book depth. The speedup is not a fixed multiple; it grows with book size (about 68x at 5,000 orders up to roughly 1,760x at 80,000), which is what fixing an algorithmic complexity problem looks like rather than a constant-factor tweak.
+
+One honest caveat on the claim: the slot unlink itself is O(1), but cancellation still does an `O(log P)` lookup into the price-level `std::map`, where P is the number of distinct price levels. The correct description is O(log P) map lookup plus O(1) unlink, not literally O(1) end to end.
+
+I also added targeted tests for the cases the linked-list structure introduces: cancelling from the middle of a price level and confirming FIFO priority is preserved for the remaining orders, cancelling head and tail nodes, cancelling the only order so the price level is removed, and heavy add/cancel churn to confirm slot reuse does not corrupt the pool.
+
+Next step: replay a real depth-of-book dataset (LOBSTER) instead of only synthetic events, and add a lock-free single-producer/single-consumer queue between market data ingestion and the order book.
