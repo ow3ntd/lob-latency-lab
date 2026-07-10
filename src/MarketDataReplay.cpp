@@ -106,6 +106,63 @@ Side parse_side(const std::string& value, std::size_t line_number) {
     throw malformed_row(line_number, "invalid side");
 }
 
+// LOBSTER stores the event type as a small integer code and the side as a
+// direction of 1 (bid) or -1 (ask). Timestamps are seconds-after-midnight
+// with a decimal part; we parse them as a fixed-point integer of nanoseconds
+// so the engine keeps a monotonic integer timestamp without floating point.
+long parse_lobster_int(const std::string& value, std::size_t line_number,
+                       const char* what) {
+    try {
+        std::size_t parsed = 0;
+        long result = std::stol(value, &parsed);
+
+        if (parsed != value.size()) {
+            throw malformed_row(line_number, std::string("invalid ") + what);
+        }
+
+        return result;
+    } catch (const std::invalid_argument&) {
+        throw malformed_row(line_number, std::string("invalid ") + what);
+    } catch (const std::out_of_range&) {
+        throw malformed_row(line_number, std::string(what) + " out of range");
+    }
+}
+
+// Convert a LOBSTER "seconds after midnight" timestamp (which may carry a
+// fractional part, e.g. "34200.017459617") into an integer nanosecond count.
+// We avoid floating point by splitting on the decimal point and scaling the
+// fractional digits to nanosecond resolution.
+Timestamp parse_lobster_timestamp(const std::string& value, std::size_t line_number) {
+    auto dot = value.find('.');
+
+    std::string whole = (dot == std::string::npos) ? value : value.substr(0, dot);
+    std::string frac  = (dot == std::string::npos) ? "" : value.substr(dot + 1);
+
+    Timestamp seconds = parse_timestamp(whole, line_number);
+
+    // Pad or truncate the fractional part to exactly 9 digits (nanoseconds).
+    if (frac.size() > 9) {
+        frac = frac.substr(0, 9);
+    }
+    while (frac.size() < 9) {
+        frac.push_back('0');
+    }
+
+    Timestamp nanos = frac.empty() ? 0 : parse_timestamp(frac, line_number);
+
+    return seconds * 1'000'000'000ULL + nanos;
+}
+
+Side lobster_direction_to_side(long direction, std::size_t line_number) {
+    if (direction == 1) {
+        return Side::Buy;
+    }
+    if (direction == -1) {
+        return Side::Sell;
+    }
+    throw malformed_row(line_number, "invalid direction");
+}
+
 }  // namespace
 
 ReplaySummary replay_market_data(std::istream& input, OrderBook& book) {
@@ -159,6 +216,99 @@ ReplaySummary replay_market_data(std::istream& input, OrderBook& book) {
             }
         } else {
             throw malformed_row(line_number, "invalid event type");
+        }
+    }
+
+    return summary;
+}
+
+LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book) {
+    LobsterSummary summary;
+
+    std::string line;
+    std::size_t line_number = 0;
+
+    // LOBSTER message files have no header row, so we do NOT skip the first
+    // line here (unlike our own CSV format, which is headed).
+    while (std::getline(input, line)) {
+        ++line_number;
+
+        if (line.empty()) {
+            continue;
+        }
+
+        auto fields = split_csv_line(line);
+
+        if (fields.size() < 6) {
+            throw malformed_row(line_number, "expected at least 6 fields");
+        }
+
+        Timestamp timestamp = parse_lobster_timestamp(fields[0], line_number);
+        long type = parse_lobster_int(fields[1], line_number, "type");
+        OrderId order_id = parse_order_id(fields[2], line_number);
+        Quantity size = parse_quantity(fields[3], line_number);
+        Price price = parse_price(fields[4], line_number);
+        long direction = parse_lobster_int(fields[5], line_number, "direction");
+
+        ++summary.events_processed;
+
+        switch (type) {
+            case 1: {  // new limit order
+                Order order{
+                    order_id,
+                    lobster_direction_to_side(direction, line_number),
+                    price,
+                    size,
+                    timestamp
+                };
+                book.add_order(order);
+                ++summary.new_orders;
+                break;
+            }
+            case 2: {  // partial cancellation: reduce resting size
+                // The book supports whole-order cancellation, so we model a
+                // partial cancel as removing the order and re-adding the
+                // reduced remainder. If the order is unknown we simply count
+                // the event without touching the book.
+                ++summary.partial_cancels;
+                if (book.cancel_order(order_id)) {
+                    ++summary.successful_cancels;
+                    // We do not know the original resting quantity from the
+                    // message alone, so we conservatively re-add the reduced
+                    // size reported for the remaining order.
+                    Order remainder{
+                        order_id,
+                        lobster_direction_to_side(direction, line_number),
+                        price,
+                        size,
+                        timestamp
+                    };
+                    book.add_order(remainder);
+                }
+                break;
+            }
+            case 3: {  // deletion (full cancel)
+                ++summary.deletions;
+                if (book.cancel_order(order_id)) {
+                    ++summary.successful_cancels;
+                }
+                break;
+            }
+            case 4: {  // visible execution: already resolved in the data
+                ++summary.executions;
+                summary.executed_quantity += size;
+                break;
+            }
+            case 5: {  // hidden execution: not part of the visible book
+                ++summary.hidden_executions;
+                break;
+            }
+            case 7: {  // trading halt / auxiliary
+                ++summary.auxiliary;
+                break;
+            }
+            default:
+                throw malformed_row(line_number, "unknown LOBSTER event type");
         }
     }
 
