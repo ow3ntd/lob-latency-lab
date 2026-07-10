@@ -60,3 +60,7 @@ add_executable(bench_cancel_stress
 )
 
 target_link_libraries(bench_cancel_stress PRIVATE lob)
+add_executable(lob_lobster_demo
+    src/lob_lobster_demo.cpp
+)
+target_link_libraries(lob_lobster_demo PRIVATE lob)
