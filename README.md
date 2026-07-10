@@ -55,6 +55,23 @@ The project separates input handling, matching logic, and measurement:
 * `bench_order_book.cpp` measures synthetic in-memory throughput without CSV parsing or console printing inside the timed loop.
 * `tests/test_order_book.cpp` verifies core matching and cancellation behavior.
 
+## Market Data Replay
+
+The engine replays two input formats through the same order book:
+
+* A simple internal CSV format (`ADD`/`CANCEL`, `BUY`/`SELL`) used for tests and the synthetic benchmark.
+* The real **LOBSTER** message format (6-column NASDAQ TotalView-ITCH events: time, type, order id, size, price, direction).
+
+The LOBSTER reader (`replay_lobster_data`) parses real message files, mapping submissions, cancellations, and deletions onto the book. Because LOBSTER data is already reconstructed, executions and hidden liquidity are counted rather than re-matched — the goal is to exercise the engine on real NASDAQ event sequences and data shapes, not to reproduce NASDAQ's exact trades.
+
+Replaying the AAPL 2012-06-21 sample processes 400,391 real events and ends with a coherent one-tick book (best bid/ask 5775600/5775700). Full results and reproduction steps are in `results/lobster_replay_summary.md`.
+
+The LOBSTER sample data itself is **not committed** to this repository: it derives from NASDAQ TotalView-ITCH under an academic waiver that does not permit redistribution. Download the free sample from lobsterdata.com and run:
+
+```bash
+./build/lob_lobster_demo data/AAPL_2012-06-21_34200000_57600000_message_10.csv
+```
+
 ## Current Features
 
 * Buy and sell limit order support
@@ -64,6 +81,7 @@ The project separates input handling, matching logic, and measurement:
 * Partial and full fill handling
 * Trade event generation
 * CSV-based market data replay
+* Real LOBSTER message-format replay (real NASDAQ event data)
 * Synthetic in-memory benchmark runner
 * Correctness tests for core order book behavior
 
