@@ -62,7 +62,7 @@ The engine replays two input formats through the same order book:
 * A simple internal CSV format (`ADD`/`CANCEL`, `BUY`/`SELL`) used for tests and the synthetic benchmark.
 * The real **LOBSTER** message format (6-column NASDAQ TotalView-ITCH events: time, type, order id, size, price, direction).
 
-The LOBSTER reader (`replay_lobster_data`) parses real message files, mapping submissions, cancellations, and deletions onto the book. Because LOBSTER data is already reconstructed, executions and hidden liquidity are counted rather than re-matched — the goal is to exercise the engine on real NASDAQ event sequences and data shapes, not to reproduce NASDAQ's exact trades.
+The LOBSTER reader (`replay_lobster_data`) parses real message files, mapping submissions, cancellations, and deletions onto the book. Because LOBSTER data is already reconstructed, executions and hidden liquidity are counted rather than re-matched: the goal is to exercise the engine on real NASDAQ event sequences and data shapes, not to reproduce NASDAQ's exact trades.
 
 Replaying the AAPL 2012-06-21 sample processes 400,391 real events and ends with a coherent one-tick book (best bid/ask 5775600/5775700). Full results and reproduction steps are in `results/lobster_replay_summary.md`.
 
