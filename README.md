@@ -1,5 +1,7 @@
 # lob-latency-lab
 
+![C++ CI](https://github.com/ow3ntd/lob-latency-lab/actions/workflows/ci.yml/badge.svg)
+
 [![CI](https://github.com/ow3ntd/lob-latency-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/ow3ntd/lob-latency-lab/actions/workflows/ci.yml)
 
 A C++20 limit order book and matching engine built for measurable low-latency performance: contiguous slot-pool storage, depth-independent cancellation, percentile latency benchmarks, and replay of real NASDAQ (LOBSTER) market data.
