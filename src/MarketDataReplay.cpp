@@ -266,25 +266,19 @@ LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book) {
                 break;
             }
             case 2: {  // partial cancellation: reduce resting size
-                // The book supports whole-order cancellation, so we model a
-                // partial cancel as removing the order and re-adding the
-                // reduced remainder. If the order is unknown we simply count
-                // the event without touching the book.
                 ++summary.partial_cancels;
-                if (book.cancel_order(order_id)) {
-                    ++summary.successful_cancels;
-                    // We do not know the original resting quantity from the
-                    // message alone, so we conservatively re-add the reduced
-                    // size reported for the remaining order.
-                    Order remainder{
-                        order_id,
-                        lobster_direction_to_side(direction, line_number),
-                        price,
-                        size,
-                        timestamp
-                    };
-                    book.add_order(remainder);
+
+                switch (book.reduce_order(order_id, size)) {
+                    case ReduceResult::Reduced:
+                    case ReduceResult::Removed:
+                        ++summary.successful_cancels;
+                        break;
+                    case ReduceResult::NotFound:
+                    case ReduceResult::InvalidQuantity:
+                    case ReduceResult::ExceedsQuantity:
+                        break;
                 }
+
                 break;
             }
             case 3: {  // deletion (full cancel)
@@ -294,13 +288,29 @@ LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book) {
                 }
                 break;
             }
-            case 4: {  // visible execution: already resolved in the data
+            case 4: {  // visible execution: reduce the referenced resting order
                 ++summary.executions;
                 summary.executed_quantity += size;
+
+                switch (book.reduce_order(order_id, size)) {
+                    case ReduceResult::Reduced:
+                    case ReduceResult::Removed:
+                        ++summary.successful_execution_reductions;
+                        break;
+                    case ReduceResult::NotFound:
+                    case ReduceResult::InvalidQuantity:
+                    case ReduceResult::ExceedsQuantity:
+                        break;
+                }
+
                 break;
             }
             case 5: {  // hidden execution: not part of the visible book
                 ++summary.hidden_executions;
+                break;
+            }
+            case 6: {  // cross trade: not part of the visible book
+                ++summary.cross_trades;
                 break;
             }
             case 7: {  // trading halt / auxiliary

@@ -204,6 +204,32 @@ bool OrderBook::cancel_order(OrderId order_id) {
     return true;
 }
 
+ReduceResult OrderBook::reduce_order(OrderId order_id, Quantity quantity) {
+    if (quantity <= 0) {
+        return ReduceResult::InvalidQuantity;
+    }
+
+    auto location_it = order_location_.find(order_id);
+
+    if (location_it == order_location_.end()) {
+        return ReduceResult::NotFound;
+    }
+
+    Order& order = pool_[location_it->second].order;
+
+    if (quantity > order.quantity) {
+        return ReduceResult::ExceedsQuantity;
+    }
+
+    if (quantity == order.quantity) {
+        cancel_order(order_id);
+        return ReduceResult::Removed;
+    }
+
+    order.quantity -= quantity;
+    return ReduceResult::Reduced;
+}
+
 std::optional<Price> OrderBook::best_bid() const {
     if (bids_.empty()) {
         return std::nullopt;
