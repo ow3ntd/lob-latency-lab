@@ -11,6 +11,14 @@
 
 namespace lob {
 
+enum class ReduceResult {
+    Reduced,
+    Removed,
+    NotFound,
+    InvalidQuantity,
+    ExceedsQuantity
+};
+
 class OrderBook {
 public:
     OrderBook() = default;
@@ -18,6 +26,8 @@ public:
     std::vector<Trade> add_order(const Order& order);
 
     bool cancel_order(OrderId order_id);
+
+    ReduceResult reduce_order(OrderId order_id, Quantity quantity);
 
     std::optional<Price> best_bid() const;
 
