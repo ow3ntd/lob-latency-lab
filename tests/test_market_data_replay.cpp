@@ -1,6 +1,6 @@
 #include "MarketDataReplay.hpp"
+#include "TestSupport.hpp"
 
-#include <cassert>
 #include <iostream>
 #include <sstream>
 
@@ -16,16 +16,16 @@ void test_replay_market_data_summary_and_book_state() {
     lob::OrderBook book;
     auto summary = lob::replay_market_data(input, book);
 
-    assert(summary.events_processed == 4);
-    assert(summary.add_events == 3);
-    assert(summary.cancel_events == 1);
-    assert(summary.successful_cancels == 1);
-    assert(summary.trades_generated == 1);
-    assert(summary.total_traded_quantity == 50);
-    assert(book.order_count() == 1);
-    assert(book.best_ask().has_value());
-    assert(*book.best_ask() == 10060);
-    assert(!book.best_bid().has_value());
+    CHECK(summary.events_processed == 4);
+    CHECK(summary.add_events == 3);
+    CHECK(summary.cancel_events == 1);
+    CHECK(summary.successful_cancels == 1);
+    CHECK(summary.trades_generated == 1);
+    CHECK(summary.total_traded_quantity == 50);
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_ask().has_value());
+    CHECK(*book.best_ask() == 10060);
+    CHECK(!book.best_bid().has_value());
 }
 
 void test_lobster_partial_cancel_subtracts_event_quantity() {
@@ -37,17 +37,17 @@ void test_lobster_partial_cancel_subtracts_event_quantity() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.events_processed == 2);
-    assert(summary.partial_cancels == 1);
-    assert(summary.successful_cancels == 1);
-    assert(book.order_count() == 1);
+    CHECK(summary.events_processed == 2);
+    CHECK(summary.partial_cancels == 1);
+    CHECK(summary.successful_cancels == 1);
+    CHECK(book.order_count() == 1);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 6, 3});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 6);
-    assert(book.order_count() == 0);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 6);
+    CHECK(book.order_count() == 0);
 }
 
 void test_lobster_partial_cancel_preserves_fifo_position() {
@@ -60,16 +60,16 @@ void test_lobster_partial_cancel_preserves_fifo_position() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.partial_cancels == 1);
-    assert(summary.successful_cancels == 1);
+    CHECK(summary.partial_cancels == 1);
+    CHECK(summary.successful_cancels == 1);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 7, 4});
 
-    assert(trades.size() == 2);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 6);
-    assert(trades[1].resting_order_id == 2);
-    assert(trades[1].quantity == 1);
+    CHECK(trades.size() == 2);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 6);
+    CHECK(trades[1].resting_order_id == 2);
+    CHECK(trades[1].quantity == 1);
 }
 
 void test_lobster_visible_execution_reduces_referenced_order() {
@@ -81,16 +81,16 @@ void test_lobster_visible_execution_reduces_referenced_order() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.executions == 1);
-    assert(summary.successful_execution_reductions == 1);
-    assert(summary.executed_quantity == 4);
-    assert(book.order_count() == 1);
+    CHECK(summary.executions == 1);
+    CHECK(summary.successful_execution_reductions == 1);
+    CHECK(summary.executed_quantity == 4);
+    CHECK(book.order_count() == 1);
 
     auto trades = book.add_order({100, lob::Side::Buy, 10060, 6, 3});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 6);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 6);
 }
 
 void test_lobster_visible_execution_exhausts_order() {
@@ -102,11 +102,11 @@ void test_lobster_visible_execution_exhausts_order() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.executions == 1);
-    assert(summary.successful_execution_reductions == 1);
-    assert(summary.executed_quantity == 10);
-    assert(book.order_count() == 0);
-    assert(!book.best_ask().has_value());
+    CHECK(summary.executions == 1);
+    CHECK(summary.successful_execution_reductions == 1);
+    CHECK(summary.executed_quantity == 10);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_lobster_cross_trade_does_not_mutate_visible_book() {
@@ -118,17 +118,17 @@ void test_lobster_cross_trade_does_not_mutate_visible_book() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.events_processed == 2);
-    assert(summary.cross_trades == 1);
-    assert(book.order_count() == 1);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10050);
+    CHECK(summary.events_processed == 2);
+    CHECK(summary.cross_trades == 1);
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10050);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 10, 3});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 10);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 10);
 }
 
 void test_lobster_unsuccessful_reductions_are_not_counted() {
@@ -141,20 +141,20 @@ void test_lobster_unsuccessful_reductions_are_not_counted() {
     lob::OrderBook book;
     auto summary = lob::replay_lobster_data(input, book);
 
-    assert(summary.events_processed == 3);
-    assert(summary.partial_cancels == 1);
-    assert(summary.successful_cancels == 0);
-    assert(summary.executions == 1);
-    assert(summary.successful_execution_reductions == 0);
-    assert(summary.executed_quantity == 11);
-    assert(book.order_count() == 1);
+    CHECK(summary.events_processed == 3);
+    CHECK(summary.partial_cancels == 1);
+    CHECK(summary.successful_cancels == 0);
+    CHECK(summary.executions == 1);
+    CHECK(summary.successful_execution_reductions == 0);
+    CHECK(summary.executed_quantity == 11);
+    CHECK(book.order_count() == 1);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 10, 4});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 10);
-    assert(book.order_count() == 0);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 10);
+    CHECK(book.order_count() == 0);
 }
 
 int main() {

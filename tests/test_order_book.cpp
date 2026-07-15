@@ -1,6 +1,6 @@
 #include "OrderBook.hpp"
+#include "TestSupport.hpp"
 
-#include <cassert>
 #include <iostream>
 #include <vector>
 
@@ -10,13 +10,13 @@ void test_add_non_crossing_orders() {
     auto trades1 = book.add_order({1, lob::Side::Buy, 10050, 200, 1000});
     auto trades2 = book.add_order({2, lob::Side::Sell, 10060, 100, 1001});
 
-    assert(trades1.empty());
-    assert(trades2.empty());
-    assert(book.order_count() == 2);
-    assert(book.best_bid().has_value());
-    assert(book.best_ask().has_value());
-    assert(*book.best_bid() == 10050);
-    assert(*book.best_ask() == 10060);
+    CHECK(trades1.empty());
+    CHECK(trades2.empty());
+    CHECK(book.order_count() == 2);
+    CHECK(book.best_bid().has_value());
+    CHECK(book.best_ask().has_value());
+    CHECK(*book.best_bid() == 10050);
+    CHECK(*book.best_ask() == 10060);
 }
 
 void test_cancel_existing_order() {
@@ -26,9 +26,9 @@ void test_cancel_existing_order() {
 
     bool cancelled = book.cancel_order(1);
 
-    assert(cancelled);
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
+    CHECK(cancelled);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
 }
 
 void test_cancel_missing_order() {
@@ -36,10 +36,10 @@ void test_cancel_missing_order() {
 
     bool cancelled = book.cancel_order(999);
 
-    assert(!cancelled);
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
-    assert(!book.best_ask().has_value());
+    CHECK(!cancelled);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_cancel_missing_order_does_not_change_book() {
@@ -48,12 +48,12 @@ void test_cancel_missing_order_does_not_change_book() {
     auto trades = book.add_order({1, lob::Side::Buy, 10050, 200, 1000});
     bool cancelled = book.cancel_order(999);
 
-    assert(trades.empty());
-    assert(!cancelled);
-    assert(book.order_count() == 1);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10050);
-    assert(!book.best_ask().has_value());
+    CHECK(trades.empty());
+    CHECK(!cancelled);
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10050);
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_cancel_already_filled_order() {
@@ -64,21 +64,21 @@ void test_cancel_already_filled_order() {
     auto fill_trades = book.add_order({2, lob::Side::Buy, 10060, 100, 1001});
     bool cancelled = book.cancel_order(1);
 
-    assert(fill_trades.size() == 1);
-    assert(fill_trades[0].resting_order_id == 1);
-    assert(fill_trades[0].quantity == 100);
-    assert(!cancelled);
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
-    assert(!book.best_ask().has_value());
+    CHECK(fill_trades.size() == 1);
+    CHECK(fill_trades[0].resting_order_id == 1);
+    CHECK(fill_trades[0].quantity == 100);
+    CHECK(!cancelled);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_empty_book_best_prices() {
     lob::OrderBook book;
 
-    assert(!book.best_bid().has_value());
-    assert(!book.best_ask().has_value());
-    assert(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
+    CHECK(!book.best_ask().has_value());
+    CHECK(book.order_count() == 0);
 }
 
 void test_order_rests_when_opposite_side_empty() {
@@ -86,11 +86,11 @@ void test_order_rests_when_opposite_side_empty() {
 
     auto trades = book.add_order({1, lob::Side::Buy, 10050, 200, 1000});
 
-    assert(trades.empty());
-    assert(book.order_count() == 1);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10050);
-    assert(!book.best_ask().has_value());
+    CHECK(trades.empty());
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10050);
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_crossing_buy_partial_fill() {
@@ -100,15 +100,15 @@ void test_crossing_buy_partial_fill() {
 
     auto trades = book.add_order({2, lob::Side::Buy, 10060, 50, 1001});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].aggressive_order_id == 2);
-    assert(trades[0].price == 10060);
-    assert(trades[0].quantity == 50);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].aggressive_order_id == 2);
+    CHECK(trades[0].price == 10060);
+    CHECK(trades[0].quantity == 50);
 
-    assert(book.order_count() == 1);
-    assert(book.best_ask().has_value());
-    assert(*book.best_ask() == 10060);
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_ask().has_value());
+    CHECK(*book.best_ask() == 10060);
 }
 
 void test_crossing_buy_full_fill_with_remainder() {
@@ -118,14 +118,14 @@ void test_crossing_buy_full_fill_with_remainder() {
 
     auto trades = book.add_order({2, lob::Side::Buy, 10060, 150, 1001});
 
-    assert(trades.size() == 1);
-    assert(trades[0].price == 10060);
-    assert(trades[0].quantity == 100);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].price == 10060);
+    CHECK(trades[0].quantity == 100);
 
-    assert(book.order_count() == 1);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10060);
-    assert(!book.best_ask().has_value());
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10060);
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_crossing_sell_partial_fill() {
@@ -135,15 +135,15 @@ void test_crossing_sell_partial_fill() {
 
     auto trades = book.add_order({2, lob::Side::Sell, 10050, 75, 1001});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].aggressive_order_id == 2);
-    assert(trades[0].price == 10050);
-    assert(trades[0].quantity == 75);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].aggressive_order_id == 2);
+    CHECK(trades[0].price == 10050);
+    CHECK(trades[0].quantity == 75);
 
-    assert(book.order_count() == 1);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10050);
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10050);
 }
 
 void test_partial_fill_keeps_positive_resting_quantity() {
@@ -154,13 +154,13 @@ void test_partial_fill_keeps_positive_resting_quantity() {
     auto partial_trades = book.add_order({2, lob::Side::Buy, 10060, 40, 1001});
     auto remaining_trades = book.add_order({3, lob::Side::Buy, 10060, 60, 1002});
 
-    assert(partial_trades.size() == 1);
-    assert(partial_trades[0].quantity == 40);
-    assert(remaining_trades.size() == 1);
-    assert(remaining_trades[0].resting_order_id == 1);
-    assert(remaining_trades[0].quantity == 60);
-    assert(book.order_count() == 0);
-    assert(!book.best_ask().has_value());
+    CHECK(partial_trades.size() == 1);
+    CHECK(partial_trades[0].quantity == 40);
+    CHECK(remaining_trades.size() == 1);
+    CHECK(remaining_trades[0].resting_order_id == 1);
+    CHECK(remaining_trades[0].quantity == 60);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_ask().has_value());
 }
 
 void test_full_fill_leaves_no_negative_resting_quantity() {
@@ -170,17 +170,17 @@ void test_full_fill_leaves_no_negative_resting_quantity() {
 
     auto fill_trades = book.add_order({2, lob::Side::Sell, 10050, 75, 1001});
 
-    assert(fill_trades.size() == 1);
-    assert(fill_trades[0].quantity == 75);
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
+    CHECK(fill_trades.size() == 1);
+    CHECK(fill_trades[0].quantity == 75);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
 
     auto later_trades = book.add_order({3, lob::Side::Sell, 10050, 1, 1002});
 
-    assert(later_trades.empty());
-    assert(book.order_count() == 1);
-    assert(book.best_ask().has_value());
-    assert(*book.best_ask() == 10050);
+    CHECK(later_trades.empty());
+    CHECK(book.order_count() == 1);
+    CHECK(book.best_ask().has_value());
+    CHECK(*book.best_ask() == 10050);
 }
 
 void test_basic_volume_conservation_with_remainder() {
@@ -191,13 +191,13 @@ void test_basic_volume_conservation_with_remainder() {
     auto trades = book.add_order({2, lob::Side::Buy, 10060, 150, 1001});
     auto remainder_trades = book.add_order({3, lob::Side::Sell, 10060, 50, 1002});
 
-    assert(trades.size() == 1);
-    assert(trades[0].quantity == 100);
-    assert(remainder_trades.size() == 1);
-    assert(remainder_trades[0].resting_order_id == 2);
-    assert(remainder_trades[0].quantity == 50);
-    assert(trades[0].quantity + remainder_trades[0].quantity == 150);
-    assert(book.order_count() == 0);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].quantity == 100);
+    CHECK(remainder_trades.size() == 1);
+    CHECK(remainder_trades[0].resting_order_id == 2);
+    CHECK(remainder_trades[0].quantity == 50);
+    CHECK(trades[0].quantity + remainder_trades[0].quantity == 150);
+    CHECK(book.order_count() == 0);
 }
 
 void test_cancel_middle_order_preserves_fifo() {
@@ -209,16 +209,16 @@ void test_cancel_middle_order_preserves_fifo() {
 
     bool cancelled = book.cancel_order(2);
 
-    assert(cancelled);
-    assert(book.order_count() == 2);
+    CHECK(cancelled);
+    CHECK(book.order_count() == 2);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 15, 1003});
 
-    assert(trades.size() == 2);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 10);
-    assert(trades[1].resting_order_id == 3);
-    assert(trades[1].quantity == 5);
+    CHECK(trades.size() == 2);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 10);
+    CHECK(trades[1].resting_order_id == 3);
+    CHECK(trades[1].quantity == 5);
 }
 
 void test_cancel_head_order_advances_correctly() {
@@ -229,12 +229,12 @@ void test_cancel_head_order_advances_correctly() {
 
     bool cancelled = book.cancel_order(1);
 
-    assert(cancelled);
+    CHECK(cancelled);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 5, 1002});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 2);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 2);
 }
 
 void test_cancel_tail_order() {
@@ -245,10 +245,10 @@ void test_cancel_tail_order() {
 
     bool cancelled = book.cancel_order(2);
 
-    assert(cancelled);
-    assert(book.best_bid().has_value());
-    assert(*book.best_bid() == 10050);
-    assert(book.order_count() == 1);
+    CHECK(cancelled);
+    CHECK(book.best_bid().has_value());
+    CHECK(*book.best_bid() == 10050);
+    CHECK(book.order_count() == 1);
 }
 
 void test_cancel_only_order_removes_price_level() {
@@ -258,9 +258,9 @@ void test_cancel_only_order_removes_price_level() {
 
     bool cancelled = book.cancel_order(1);
 
-    assert(cancelled);
-    assert(!book.best_bid().has_value());
-    assert(book.order_count() == 0);
+    CHECK(cancelled);
+    CHECK(!book.best_bid().has_value());
+    CHECK(book.order_count() == 0);
 }
 
 void test_slot_reuse_after_heavy_cancel_churn() {
@@ -271,17 +271,17 @@ void test_slot_reuse_after_heavy_cancel_churn() {
         book.cancel_order(static_cast<lob::OrderId>(i));
     }
 
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
 
     book.add_order({9001, lob::Side::Buy, 10050, 5, 1000});
     book.add_order({9002, lob::Side::Buy, 10050, 5, 1001});
 
     auto trades = book.add_order({9003, lob::Side::Sell, 10050, 10, 1002});
 
-    assert(trades.size() == 2);
-    assert(trades[0].resting_order_id == 9001);
-    assert(trades[1].resting_order_id == 9002);
+    CHECK(trades.size() == 2);
+    CHECK(trades[0].resting_order_id == 9001);
+    CHECK(trades[1].resting_order_id == 9002);
 }
 
 void test_reduce_rejects_invalid_quantity() {
@@ -289,16 +289,16 @@ void test_reduce_rejects_invalid_quantity() {
 
     book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
 
-    assert(book.reduce_order(1, 0) == lob::ReduceResult::InvalidQuantity);
-    assert(book.reduce_order(1, -1) == lob::ReduceResult::InvalidQuantity);
-    assert(book.order_count() == 1);
+    CHECK(book.reduce_order(1, 0) == lob::ReduceResult::InvalidQuantity);
+    CHECK(book.reduce_order(1, -1) == lob::ReduceResult::InvalidQuantity);
+    CHECK(book.order_count() == 1);
 }
 
 void test_reduce_missing_order() {
     lob::OrderBook book;
 
-    assert(book.reduce_order(999, 5) == lob::ReduceResult::NotFound);
-    assert(book.order_count() == 0);
+    CHECK(book.reduce_order(999, 5) == lob::ReduceResult::NotFound);
+    CHECK(book.order_count() == 0);
 }
 
 void test_reduce_rejects_quantity_exceeding_resting_quantity() {
@@ -306,13 +306,13 @@ void test_reduce_rejects_quantity_exceeding_resting_quantity() {
 
     book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
 
-    assert(book.reduce_order(1, 11) == lob::ReduceResult::ExceedsQuantity);
+    CHECK(book.reduce_order(1, 11) == lob::ReduceResult::ExceedsQuantity);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 10, 1001});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 10);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 10);
 }
 
 void test_partial_reduction_subtracts_quantity() {
@@ -320,14 +320,14 @@ void test_partial_reduction_subtracts_quantity() {
 
     book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
 
-    assert(book.reduce_order(1, 4) == lob::ReduceResult::Reduced);
-    assert(book.order_count() == 1);
+    CHECK(book.reduce_order(1, 4) == lob::ReduceResult::Reduced);
+    CHECK(book.order_count() == 1);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 6, 1001});
 
-    assert(trades.size() == 1);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 6);
+    CHECK(trades.size() == 1);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 6);
 }
 
 void test_partial_reduction_preserves_fifo_position() {
@@ -336,15 +336,15 @@ void test_partial_reduction_preserves_fifo_position() {
     book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
     book.add_order({2, lob::Side::Buy, 10050, 10, 1001});
 
-    assert(book.reduce_order(1, 4) == lob::ReduceResult::Reduced);
+    CHECK(book.reduce_order(1, 4) == lob::ReduceResult::Reduced);
 
     auto trades = book.add_order({100, lob::Side::Sell, 10050, 7, 1002});
 
-    assert(trades.size() == 2);
-    assert(trades[0].resting_order_id == 1);
-    assert(trades[0].quantity == 6);
-    assert(trades[1].resting_order_id == 2);
-    assert(trades[1].quantity == 1);
+    CHECK(trades.size() == 2);
+    CHECK(trades[0].resting_order_id == 1);
+    CHECK(trades[0].quantity == 6);
+    CHECK(trades[1].resting_order_id == 2);
+    CHECK(trades[1].quantity == 1);
 }
 
 void test_exact_reduction_removes_order() {
@@ -352,10 +352,10 @@ void test_exact_reduction_removes_order() {
 
     book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
 
-    assert(book.reduce_order(1, 10) == lob::ReduceResult::Removed);
-    assert(book.order_count() == 0);
-    assert(!book.best_bid().has_value());
-    assert(book.reduce_order(1, 1) == lob::ReduceResult::NotFound);
+    CHECK(book.reduce_order(1, 10) == lob::ReduceResult::Removed);
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
+    CHECK(book.reduce_order(1, 1) == lob::ReduceResult::NotFound);
 }
 
 int main() {
