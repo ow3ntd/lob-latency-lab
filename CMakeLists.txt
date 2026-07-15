@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(lob_latency_lab LANGUAGES CXX)
 
+enable_testing()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -31,11 +33,15 @@ add_executable(test_order_book
 
 target_link_libraries(test_order_book PRIVATE lob)
 
+add_test(NAME test_order_book COMMAND test_order_book)
+
 add_executable(test_market_data_replay
     tests/test_market_data_replay.cpp
 )
 
 target_link_libraries(test_market_data_replay PRIVATE lob)
+
+add_test(NAME test_market_data_replay COMMAND test_market_data_replay)
 
 add_executable(bench_order_book
     benchmarks/bench_order_book.cpp
