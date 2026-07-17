@@ -1,8 +1,13 @@
 #include "MarketDataReplay.hpp"
 
+#include <charconv>
+#include <cstdint>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace lob {
@@ -18,6 +23,61 @@ std::vector<std::string> split_csv_line(const std::string& line) {
     }
 
     return fields;
+}
+
+std::vector<std::string_view> split_csv_fields(std::string_view line) {
+    std::vector<std::string_view> fields;
+    std::size_t start = 0;
+
+    while (true) {
+        std::size_t comma = line.find(',', start);
+
+        if (comma == std::string_view::npos) {
+            fields.push_back(line.substr(start));
+            break;
+        }
+
+        fields.push_back(line.substr(start, comma - start));
+        start = comma + 1;
+    }
+
+    return fields;
+}
+
+std::runtime_error malformed_book_field(
+    std::size_t level,
+    const char* field,
+    const std::string& reason
+) {
+    return std::runtime_error(
+        "Malformed LOBSTER book row at level " + std::to_string(level) +
+        ", " + field + ": " + reason
+    );
+}
+
+std::int64_t parse_book_integer(
+    std::string_view value,
+    std::size_t level,
+    const char* field
+) {
+    if (value.empty()) {
+        throw malformed_book_field(level, field, "empty field");
+    }
+
+    std::int64_t result = 0;
+    const char* begin = value.data();
+    const char* end = begin + value.size();
+    auto parsed = std::from_chars(begin, end, result);
+
+    if (parsed.ec == std::errc::result_out_of_range) {
+        throw malformed_book_field(level, field, "integer out of range");
+    }
+
+    if (parsed.ec != std::errc{} || parsed.ptr != end) {
+        throw malformed_book_field(level, field, "invalid integer");
+    }
+
+    return result;
 }
 
 std::runtime_error malformed_row(std::size_t line_number, const std::string& reason) {
@@ -323,6 +383,146 @@ LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book) {
     }
 
     return summary;
+}
+
+LobsterBookRow parse_lobster_book_row(
+    std::string_view line,
+    std::size_t depth
+) {
+    if (depth == 0) {
+        if (!line.empty()) {
+            throw std::runtime_error(
+                "Malformed LOBSTER book row for depth 0: expected empty input"
+            );
+        }
+
+        return {};
+    }
+
+    if (depth > std::numeric_limits<std::size_t>::max() / 4) {
+        throw std::runtime_error(
+            "Malformed LOBSTER book row: depth exceeds supported field count"
+        );
+    }
+
+    std::size_t expected_fields = depth * 4;
+    auto fields = split_csv_fields(line);
+
+    if (fields.size() != expected_fields) {
+        throw std::runtime_error(
+            "Malformed LOBSTER book row for depth " +
+            std::to_string(depth) + ": expected " +
+            std::to_string(expected_fields) + " fields, got " +
+            std::to_string(fields.size())
+        );
+    }
+
+    constexpr Price kEmptyAskPrice = 9'999'999'999;
+    constexpr Price kEmptyBidPrice = -9'999'999'999;
+
+    LobsterBookRow row;
+    row.asks.reserve(depth);
+    row.bids.reserve(depth);
+
+    bool ask_sentinel_seen = false;
+    bool bid_sentinel_seen = false;
+    bool have_previous_ask = false;
+    bool have_previous_bid = false;
+    Price previous_ask = 0;
+    Price previous_bid = 0;
+
+    for (std::size_t index = 0; index < depth; ++index) {
+        std::size_t level = index + 1;
+        std::size_t offset = index * 4;
+
+        Price ask_price = parse_book_integer(fields[offset], level, "ask price");
+        Quantity ask_size = parse_book_integer(fields[offset + 1], level, "ask size");
+        Price bid_price = parse_book_integer(fields[offset + 2], level, "bid price");
+        Quantity bid_size = parse_book_integer(fields[offset + 3], level, "bid size");
+
+        if (ask_size < 0) {
+            throw malformed_book_field(level, "ask size", "negative quantity");
+        }
+        if (bid_size < 0) {
+            throw malformed_book_field(level, "bid size", "negative quantity");
+        }
+
+        if (ask_price == kEmptyAskPrice) {
+            if (ask_size != 0) {
+                throw malformed_book_field(
+                    level, "ask price", "empty-level sentinel requires size 0"
+                );
+            }
+            ask_sentinel_seen = true;
+        } else {
+            if (ask_price == kEmptyBidPrice) {
+                throw malformed_book_field(
+                    level, "ask price", "wrong-side empty-level sentinel"
+                );
+            }
+            if (ask_price <= 0) {
+                throw malformed_book_field(level, "ask price", "price must be positive");
+            }
+            if (ask_size == 0) {
+                throw malformed_book_field(
+                    level, "ask size", "occupied level requires positive quantity"
+                );
+            }
+            if (ask_sentinel_seen) {
+                throw malformed_book_field(
+                    level, "ask price", "occupied level follows empty-level sentinel"
+                );
+            }
+            if (have_previous_ask && ask_price <= previous_ask) {
+                throw malformed_book_field(
+                    level, "ask price", "ask prices must be strictly increasing"
+                );
+            }
+
+            row.asks.push_back({ask_price, ask_size});
+            previous_ask = ask_price;
+            have_previous_ask = true;
+        }
+
+        if (bid_price == kEmptyBidPrice) {
+            if (bid_size != 0) {
+                throw malformed_book_field(
+                    level, "bid price", "empty-level sentinel requires size 0"
+                );
+            }
+            bid_sentinel_seen = true;
+        } else {
+            if (bid_price == kEmptyAskPrice) {
+                throw malformed_book_field(
+                    level, "bid price", "wrong-side empty-level sentinel"
+                );
+            }
+            if (bid_price <= 0) {
+                throw malformed_book_field(level, "bid price", "price must be positive");
+            }
+            if (bid_size == 0) {
+                throw malformed_book_field(
+                    level, "bid size", "occupied level requires positive quantity"
+                );
+            }
+            if (bid_sentinel_seen) {
+                throw malformed_book_field(
+                    level, "bid price", "occupied level follows empty-level sentinel"
+                );
+            }
+            if (have_previous_bid && bid_price >= previous_bid) {
+                throw malformed_book_field(
+                    level, "bid price", "bid prices must be strictly decreasing"
+                );
+            }
+
+            row.bids.push_back({bid_price, bid_size});
+            previous_bid = bid_price;
+            have_previous_bid = true;
+        }
+    }
+
+    return row;
 }
 
 }  // namespace lob
