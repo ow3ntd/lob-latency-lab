@@ -358,6 +358,123 @@ void test_exact_reduction_removes_order() {
     CHECK(book.reduce_order(1, 1) == lob::ReduceResult::NotFound);
 }
 
+void test_empty_book_snapshot_is_empty() {
+    const lob::OrderBook book;
+
+    auto snapshot = book.snapshot(5);
+
+    CHECK(snapshot.bids.empty());
+    CHECK(snapshot.asks.empty());
+}
+
+void test_snapshot_depth_zero_is_empty() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Sell, 10060, 20, 1001});
+
+    auto snapshot = book.snapshot(0);
+
+    CHECK(snapshot.bids.empty());
+    CHECK(snapshot.asks.empty());
+    CHECK(book.order_count() == 2);
+}
+
+void test_snapshot_aggregates_orders_at_same_price() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10050, 15, 1001});
+
+    auto snapshot = book.snapshot(1);
+
+    CHECK(snapshot.bids.size() == 1);
+    CHECK(snapshot.bids[0].price == 10050);
+    CHECK(snapshot.bids[0].quantity == 25);
+    CHECK(snapshot.asks.empty());
+}
+
+void test_snapshot_orders_bids_descending() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10070, 20, 1001});
+    book.add_order({3, lob::Side::Buy, 10060, 30, 1002});
+
+    auto snapshot = book.snapshot(3);
+
+    CHECK(snapshot.bids.size() == 3);
+    CHECK(snapshot.bids[0].price == 10070);
+    CHECK(snapshot.bids[1].price == 10060);
+    CHECK(snapshot.bids[2].price == 10050);
+}
+
+void test_snapshot_orders_asks_ascending() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Sell, 10070, 10, 1000});
+    book.add_order({2, lob::Side::Sell, 10050, 20, 1001});
+    book.add_order({3, lob::Side::Sell, 10060, 30, 1002});
+
+    auto snapshot = book.snapshot(3);
+
+    CHECK(snapshot.asks.size() == 3);
+    CHECK(snapshot.asks[0].price == 10050);
+    CHECK(snapshot.asks[1].price == 10060);
+    CHECK(snapshot.asks[2].price == 10070);
+}
+
+void test_snapshot_depth_truncates_each_side_independently() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10030, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10020, 20, 1001});
+    book.add_order({3, lob::Side::Buy, 10010, 30, 1002});
+    book.add_order({4, lob::Side::Sell, 10040, 40, 1003});
+    book.add_order({5, lob::Side::Sell, 10050, 50, 1004});
+    book.add_order({6, lob::Side::Sell, 10060, 60, 1005});
+
+    auto snapshot = book.snapshot(2);
+
+    CHECK(snapshot.bids.size() == 2);
+    CHECK(snapshot.bids[0].price == 10030);
+    CHECK(snapshot.bids[1].price == 10020);
+    CHECK(snapshot.asks.size() == 2);
+    CHECK(snapshot.asks[0].price == 10040);
+    CHECK(snapshot.asks[1].price == 10050);
+}
+
+void test_snapshot_reflects_partial_reduction() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10050, 15, 1001});
+
+    CHECK(book.reduce_order(1, 4) == lob::ReduceResult::Reduced);
+
+    auto snapshot = book.snapshot(1);
+
+    CHECK(snapshot.bids.size() == 1);
+    CHECK(snapshot.bids[0].price == 10050);
+    CHECK(snapshot.bids[0].quantity == 21);
+}
+
+void test_snapshot_omits_level_after_final_order_cancelled() {
+    lob::OrderBook book;
+
+    book.add_order({1, lob::Side::Buy, 10050, 10, 1000});
+    book.add_order({2, lob::Side::Buy, 10040, 20, 1001});
+
+    CHECK(book.cancel_order(1));
+
+    auto snapshot = book.snapshot(2);
+
+    CHECK(snapshot.bids.size() == 1);
+    CHECK(snapshot.bids[0].price == 10040);
+    CHECK(snapshot.bids[0].quantity == 20);
+    CHECK(snapshot.asks.empty());
+}
+
 int main() {
     test_add_non_crossing_orders();
     test_cancel_existing_order();
@@ -383,6 +500,14 @@ int main() {
     test_partial_reduction_subtracts_quantity();
     test_partial_reduction_preserves_fifo_position();
     test_exact_reduction_removes_order();
+    test_empty_book_snapshot_is_empty();
+    test_snapshot_depth_zero_is_empty();
+    test_snapshot_aggregates_orders_at_same_price();
+    test_snapshot_orders_bids_descending();
+    test_snapshot_orders_asks_ascending();
+    test_snapshot_depth_truncates_each_side_independently();
+    test_snapshot_reflects_partial_reduction();
+    test_snapshot_omits_level_after_final_order_cancelled();
 
     std::cout << "All order book tests passed.\n";
 
