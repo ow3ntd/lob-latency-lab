@@ -250,4 +250,38 @@ std::size_t OrderBook::order_count() const {
     return order_location_.size();
 }
 
+BookSnapshot OrderBook::snapshot(std::size_t depth) const {
+    BookSnapshot result;
+
+    for (auto level_it = bids_.begin();
+         level_it != bids_.end() && result.bids.size() < depth;
+         ++level_it) {
+        Quantity quantity = 0;
+        std::size_t current = level_it->second.head;
+
+        while (current != kInvalid) {
+            quantity += pool_[current].order.quantity;
+            current = pool_[current].next;
+        }
+
+        result.bids.push_back({level_it->first, quantity});
+    }
+
+    for (auto level_it = asks_.begin();
+         level_it != asks_.end() && result.asks.size() < depth;
+         ++level_it) {
+        Quantity quantity = 0;
+        std::size_t current = level_it->second.head;
+
+        while (current != kInvalid) {
+            quantity += pool_[current].order.quantity;
+            current = pool_[current].next;
+        }
+
+        result.asks.push_back({level_it->first, quantity});
+    }
+
+    return result;
+}
+
 }  // namespace lob

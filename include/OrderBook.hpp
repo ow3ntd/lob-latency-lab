@@ -19,6 +19,20 @@ enum class ReduceResult {
     ExceedsQuantity
 };
 
+struct LevelSnapshot {
+    Price price;
+    Quantity quantity;
+
+    bool operator==(const LevelSnapshot&) const = default;
+};
+
+struct BookSnapshot {
+    std::vector<LevelSnapshot> bids;
+    std::vector<LevelSnapshot> asks;
+
+    bool operator==(const BookSnapshot&) const = default;
+};
+
 class OrderBook {
 public:
     OrderBook() = default;
@@ -34,6 +48,8 @@ public:
     std::optional<Price> best_ask() const;
 
     std::size_t order_count() const;
+
+    BookSnapshot snapshot(std::size_t depth) const;
 
 private:
     static constexpr std::size_t kInvalid = static_cast<std::size_t>(-1);
