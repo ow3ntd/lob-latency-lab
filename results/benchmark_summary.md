@@ -1,5 +1,9 @@
 # Benchmark Summary
 
+> **Status:** This is a historical throughput baseline recorded before the
+> contiguous slot-pool cancellation redesign. It is not a benchmark of the
+> current implementation.
+
 ## Benchmark Goal
 
 This benchmark measures aggregate throughput for the C++ order book and matching engine.
@@ -62,12 +66,16 @@ Across three runs, the benchmark processed approximately **24.5 million events p
 - This benchmark measures aggregate throughput, not p50/p95/p99 per-event latency.
 - Per-event latency should be measured separately because timing every event adds overhead.
 - The workload is deterministic and synthetic, so it is useful for regression tracking but not a full model of real market data.
-- Current cancellation logic scans price levels after finding the order side, so cancellation cost depends on book shape.
+- This historical benchmark used the earlier cancellation implementation, in
+  which cancellation cost depended on book shape. Current slot-pool
+  cancellation behavior is documented separately in the README, development
+  log, and cancellation-stress results.
 - Trade vector allocation inside `add_order` is included in the measured cost.
 - Results vary by CPU, compiler, optimization flags, thermal state, and background system load.
 
 ## Next Steps
 
-- Add a separate latency benchmark that reports p50, p95, and p99.
-- Compare the baseline implementation against optimized data structures.
-- Add a larger synthetic workload with deeper book levels.
+- Re-baseline the current slot-pool implementation.
+- Use repeated trials and report the median plus variability.
+- Separate add, match, reduction, cancellation, and level-removal measurements.
+- Quantify per-event timer overhead.
