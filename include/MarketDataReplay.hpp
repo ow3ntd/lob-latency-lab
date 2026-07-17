@@ -4,6 +4,8 @@
 
 #include <cstddef>
 #include <istream>
+#include <string_view>
+#include <vector>
 
 namespace lob {
 
@@ -47,5 +49,17 @@ struct LobsterSummary {
 };
 
 LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book);
+
+struct LobsterBookRow {
+    std::vector<LevelSnapshot> asks;
+    std::vector<LevelSnapshot> bids;
+
+    bool operator==(const LobsterBookRow&) const = default;
+};
+
+LobsterBookRow parse_lobster_book_row(
+    std::string_view line,
+    std::size_t depth
+);
 
 }  // namespace lob
