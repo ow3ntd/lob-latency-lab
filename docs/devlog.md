@@ -4,7 +4,7 @@
 
 Created the initial repository structure for `lob-latency-lab`.
 
-I decided to start with a design document before writing implementation code so that the project shows engineering planning instead of looking like a one-shot generated project.
+I decided to start with a design document before writing implementation code to define correctness invariants, interfaces, and benchmark boundaries before implementation.
 
 Initial scope:
 - define basic order and trade types
@@ -41,7 +41,7 @@ Test coverage now includes:
 - crossing buy full fill with remainder
 - crossing sell partial fill
 
-The tests are currently written with standard C++ `assert` statements so the project stays simple and easy to compile without external dependencies.
+At this stage, the tests used standard C++ `assert` statements so the project stayed simple and easy to compile without external dependencies.
 
 Next step: add more edge-case tests, then add market data replay from CSV.
 

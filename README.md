@@ -7,8 +7,8 @@ A C++20 limit order book and matching engine built for measurable low-latency pe
 ## Highlights
 
 - **Depth-independent cancellation.** Replaced an O(n) vector-scan cancel with an intrusive doubly-linked list backed by a contiguous slot pool. Per-cancel cost dropped from ~46,700 ns to ~26 ns at 80,000 resting orders — flat across all book depths.
-- **Percentile latency, not just averages.** Dedicated benchmarks report p50 / p95 / p99 per-event latency alongside aggregate throughput (~24.5M events/sec on the synthetic workload).
-- **Validated on real market data.** Replays the full LOBSTER AAPL sample session (400,391 NASDAQ events) with consistent order-id bookkeeping and a coherent one-tick final spread.
+- **Percentile latency, not just averages.** Dedicated benchmarks report p50 / p95 / p99 per-event latency alongside aggregate throughput. Historical baselines are retained with their implementation context in [`results/`](results/).
+- **Real-data replay path.** Parses and replays LOBSTER message files with in-place partial cancellations, visible-execution quantity reductions, and explicit handling for hidden executions and cross trades. Exact row-by-row comparison against paired LOBSTER order-book snapshots is the next validation milestone.
 - **Engineering process on record.** A [development log](docs/devlog.md) documents design decisions, including a cancellation optimization that was benchmarked, found slower, reverted, re-diagnosed, and then redesigned correctly.
 
 ## What This Is (and Isn't)
@@ -50,7 +50,9 @@ The first attempt at direct-index cancellation used `std::list` and was *slower*
 
 ## Performance
 
-All results measured on a MacBook Pro, Apple clang++, `-O3 -DNDEBUG`. Full methodology and limitations for each benchmark are in [`results/`](results/), with baselines tracked over time in [`results/performance_history.md`](results/performance_history.md).
+Recorded results were measured on a MacBook Pro with Apple clang++ and `-O3 -DNDEBUG`. Results are retained with implementation-specific status and limitations in [`results/`](results/), with baselines tracked over time in [`results/performance_history.md`](results/performance_history.md).
+
+The aggregate-throughput and percentile-latency figures below are historical baselines that predate the slot-pool cancellation redesign. They are not measurements of the current implementation.
 
 ### Cancellation scaling (2026-07-07, slot-pool redesign)
 
@@ -84,17 +86,23 @@ The old cost doubles as the book doubles (the O(n) signature); the new cost is f
 
 ## Real Market Data: LOBSTER Replay
 
-The engine replays [LOBSTER](https://lobsterdata.com) message files — reconstructed NASDAQ TotalView-ITCH order flow. The reader maps LOBSTER message types onto book operations (new orders, partial cancels, deletions), counts already-resolved executions rather than re-matching them, and parses fixed-point timestamps without floating point.
+The engine replays [LOBSTER](https://lobsterdata.com) message files—reconstructed NASDAQ TotalView-ITCH order flow. The reader handles message types as follows:
 
-Replaying the full AAPL 2012-06-21 regular session:
+- type 1 adds a visible resting order
+- type 2 reduces the referenced order in place
+- type 3 deletes the referenced order
+- type 4 reduces the referenced resting quantity without generating a new match
+- type 5 counts a hidden execution without mutating the visible book
+- type 6 counts a cross trade without mutating the visible book
+- type 7 counts an auxiliary or halt event without mutating the visible book
 
-| Metric | Value |
-|---|---:|
-| Events processed | 400,391 |
-| Successful cancels | 152,223 / 174,386 cancel-type events |
-| Final book | bid $577.56 / ask $577.57 (one-tick spread) |
+LOBSTER timestamps are parsed with fixed-point arithmetic rather than floating point.
 
-LOBSTER's academic license does not permit redistribution, so the raw data file is excluded from version control. A small synthetic sample in the same format (`data/sample_lobster_message.csv`) is committed for CI, and [`results/lobster_replay_summary.md`](results/lobster_replay_summary.md) documents how to reproduce the full-session numbers.
+Current checks establish parser coverage, event-handling coverage, order-id bookkeeping diagnostics, and basic top-of-book sanity. They do not establish exact reconstruction of the LOBSTER visible book. Row-by-row comparison against paired LOBSTER order-book snapshots is planned.
+
+LOBSTER's academic license does not permit redistribution, so the raw data file is excluded from version control. A small synthetic sample in the same format (`data/sample_lobster_message.csv`) is committed as a reproducible example. [`results/lobster_replay_summary.md`](results/lobster_replay_summary.md) documents the historical full-session run, its limitations, and the command used to run it.
+
+The full-session numbers currently documented in that report predate the corrected type-2 and type-4 quantity semantics. They are retained only as a historical parser-coverage run and must not be treated as current reconstruction-validation results.
 
 ## Build and Test
 
@@ -103,18 +111,16 @@ Requires CMake ≥ 3.20 and a C++20 compiler.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-
-./build/test_order_book
-./build/test_market_data_replay
+ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
-Or run the full build + test + benchmark pipeline:
+The convenience script performs a Release configure and build, runs the two test executables, and runs the aggregate-throughput benchmark:
 
 ```bash
 ./scripts/run_all.sh
 ```
 
-Every push builds all targets and runs both test suites plus smoke tests of all four benchmarks and the LOBSTER demo in [CI](.github/workflows/ci.yml).
+On pushes and pull requests to `main`, [CI](.github/workflows/ci.yml) builds all CMake targets, runs registered tests through CTest, fails if no tests are registered, and runs one aggregate benchmark smoke test. CI does not enforce performance thresholds.
 
 ## Benchmarks
 
@@ -128,7 +134,7 @@ Every push builds all targets and runs both test suites plus smoke tests of all 
 
 ## Testing
 
-Tests are dependency-free C++ `assert`-based suites covering:
+Tests are dependency-free suites using an always-active `CHECK` mechanism that remains enabled in Debug and Release builds. Coverage includes:
 
 - non-crossing adds, partial fills, full fills with remainder, both aggressor sides
 - cancel of existing, missing, and already-filled orders
@@ -148,8 +154,9 @@ Design decisions, benchmark-driven experiments (including the reverted one), and
 - [x] CSV market data replay
 - [x] Throughput and percentile latency benchmarks
 - [x] O(log P) + O(1) cancellation via contiguous slot pool
-- [x] Real-data replay (LOBSTER / NASDAQ)
-- [x] CI: build, test, and benchmark smoke tests on every push
+- [x] LOBSTER message-file replay
+- [ ] Paired LOBSTER order-book snapshot comparison
+- [x] CMake/CTest CI: build all targets, require registered tests, and run one aggregate benchmark smoke test
 - [ ] Lock-free SPSC queue between data ingestion and matching thread
 - [ ] Arena allocation for trade output on the hot path
 - [ ] Re-baseline throughput/latency benchmarks post slot-pool redesign

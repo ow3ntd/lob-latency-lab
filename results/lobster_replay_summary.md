@@ -1,5 +1,10 @@
 # LOBSTER Replay Summary
 
+> **Status:** The numeric results below were recorded before in-place partial
+> cancellation and visible-execution quantity reduction were implemented. They
+> are retained as a historical parser-coverage run and must not be treated as
+> current reconstruction-validation results.
+
 ## Goal
 
 This document records the result of replaying a real LOBSTER message file
@@ -32,14 +37,14 @@ it (see Run Command).
 The LOBSTER reader (`replay_lobster_data` in `src/MarketDataReplay.cpp`) maps
 LOBSTER message-type codes onto the order book as follows:
 
-- type 1 (new limit order) is added to the book
-- type 2 (partial cancellation) removes the order and re-adds the reduced size
-- type 3 (deletion) cancels the order
-- type 4 (visible execution) is counted but not re-matched, since the
-  execution is already resolved in the source data
-- type 5 (hidden execution) is counted and skipped, as hidden liquidity is not
-  part of the visible book
-- type 7 (auxiliary, e.g. trading halt) is counted and skipped
+- type 1 adds a visible resting order
+- type 2 reduces the referenced order in place by the event quantity
+- type 3 deletes the referenced order
+- type 4 reduces the referenced resting quantity by the executed quantity
+  without generating a new match
+- type 5 counts a hidden execution without mutating the visible book
+- type 6 counts a cross trade without mutating the visible book
+- type 7 counts an auxiliary or halt event without mutating the visible book
 
 Direction 1 maps to the buy side and -1 to the sell side. LOBSTER timestamps
 (seconds after midnight, with sub-second decimals) are parsed into an integer
@@ -52,10 +57,11 @@ timestamp path.
 ./build/lob_lobster_demo data/AAPL_2012-06-21_34200000_57600000_message_10.csv
 ```
 
-## Results
+## Historical Results Before Corrected Quantity Semantics
 
 Replaying the full AAPL 2012-06-21 sample (seconds 34200 to 57600, i.e. the
-regular trading session):
+regular trading session) produced the following historical parser-coverage
+record:
 
 | Metric | Value |
 |---|---:|
@@ -74,26 +80,29 @@ regular trading session):
 
 ## Interpretation
 
-The reader parsed all 400,391 events without error, which confirms the parser
-handles the real LOBSTER schema (numeric type codes, direction encoding, and
-fixed-point timestamps) and not just the synthetic sample.
+Parsing all 400,391 rows without error establishes coverage of the real LOBSTER
+message schema, including numeric type codes, direction encoding, and
+fixed-point timestamps. It does not establish that the reconstructed book
+matches the paired LOBSTER order-book data.
 
-The high ratio of successful cancels to deletion and partial-cancel events
-(152,223 out of 174,386) indicates that order-id bookkeeping stays consistent
-across hundreds of thousands of events: most deletions found their target
-resting order and removed it. A parser or bookkeeping bug would instead produce
-a large number of failed cancels against unknown order ids.
+The successful order-id lookup ratio is a bookkeeping diagnostic: it records
+how often cancellation-type events found a referenced resting order under the
+implementation used for that run. It is not proof of reconstruction
+correctness.
 
 At the end of the session the book shows a best bid of 5,775,600 and a best ask
 of 5,775,700. LOBSTER prices are expressed in units of 1/10,000 of a dollar, so
-this is a bid of \$577.56 and an ask of \$577.57, a one-tick spread, which is
-consistent with a liquid name and indicates the reconstructed book is coherent
-rather than crossed or nonsensical.
+this is a bid of \$577.56 and an ask of \$577.57. The non-crossed one-tick
+spread is a basic top-of-book sanity check, not proof of exact reconstruction.
 
 ## Limitations
 
-- This engine does not reproduce LOBSTER's executions; type-4 events are
-  counted, not re-matched, so the trade sequence is not re-derived here.
-- Hidden orders (type 5) are outside the visible book and are not modeled.
-- The numbers above come from a single machine and a single session file; they
-  characterize correctness and event coverage, not latency.
+- No row-by-row comparison against the paired LOBSTER order-book file was
+  performed.
+- The published numeric run predates corrected type-2 partial-cancellation and
+  type-4 visible-execution handling and must be regenerated.
+- Hidden liquidity is not modeled.
+- Visible executions now update the referenced resting quantity, but they do
+  not produce a newly matched `Trade` object.
+- The historical numbers come from one session file and establish parser
+  coverage only; they do not establish exact book reconstruction.
