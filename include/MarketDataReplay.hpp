@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <istream>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -59,6 +60,37 @@ struct LobsterBookRow {
 
 LobsterBookRow parse_lobster_book_row(
     std::string_view line,
+    std::size_t depth
+);
+
+enum class LobsterBookSide {
+    Bid,
+    Ask
+};
+
+struct LobsterValidationMismatch {
+    std::size_t row = 0;
+    LobsterBookSide side = LobsterBookSide::Bid;
+    std::size_t level = 0;
+    std::optional<LevelSnapshot> expected;
+    std::optional<LevelSnapshot> actual;
+};
+
+struct LobsterValidationSummary {
+    std::size_t rows_compared = 0;
+    std::size_t matching_rows = 0;
+    std::size_t mismatching_rows = 0;
+    std::size_t missing_level_mismatches = 0;
+    std::size_t price_mismatches = 0;
+    std::size_t quantity_mismatches = 0;
+    std::optional<LobsterValidationMismatch> first_mismatch;
+    LobsterSummary replay;
+};
+
+LobsterValidationSummary validate_lobster_replay(
+    std::istream& message_input,
+    std::istream& orderbook_input,
+    OrderBook& book,
     std::size_t depth
 );
 

@@ -27,6 +27,32 @@ void check_lobster_book_parse_fails(
     CHECK(threw);
 }
 
+void check_lobster_validation_fails(
+    std::string_view messages,
+    std::string_view orderbook,
+    std::size_t depth,
+    std::string_view expected_message
+) {
+    std::istringstream message_input{std::string(messages)};
+    std::istringstream orderbook_input{std::string(orderbook)};
+    lob::OrderBook book;
+    bool threw = false;
+
+    try {
+        static_cast<void>(lob::validate_lobster_replay(
+            message_input, orderbook_input, book, depth
+        ));
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        CHECK(
+            std::string_view(error.what()).find(expected_message) !=
+            std::string_view::npos
+        );
+    }
+
+    CHECK(threw);
+}
+
 void test_replay_market_data_summary_and_book_state() {
     std::istringstream input(
         "timestamp_ns,event_type,order_id,side,price,quantity\n"
@@ -361,6 +387,216 @@ void test_parse_lobster_book_row_rejects_ask_sentinel_on_bid_side() {
     );
 }
 
+void test_validate_lobster_replay_exact_matches() {
+    std::istringstream messages(
+        "1,1,1,10,100,1\n"
+        "2,1,2,5,110,-1\n"
+    );
+    std::istringstream expected(
+        "9999999999,0,100,10\n"
+        "110,5,100,10\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.rows_compared == 2);
+    CHECK(summary.matching_rows == 2);
+    CHECK(summary.mismatching_rows == 0);
+    CHECK(!summary.first_mismatch.has_value());
+    CHECK(summary.replay.events_processed == 2);
+}
+
+void test_validate_lobster_replay_exact_one_row_match() {
+    std::istringstream messages("1,1,1,10,100,1\n");
+    std::istringstream expected("9999999999,0,100,10\n");
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.rows_compared == 1);
+    CHECK(summary.matching_rows == 1);
+    CHECK(summary.replay.new_orders == 1);
+}
+
+void test_validate_lobster_replay_compares_after_each_event() {
+    std::istringstream messages(
+        "1,1,1,10,100,1\n"
+        "2,3,1,10,100,1\n"
+    );
+    std::istringstream expected(
+        "9999999999,0,100,10\n"
+        "9999999999,0,-9999999999,0\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+    CHECK(summary.matching_rows == 2);
+    CHECK(book.order_count() == 0);
+}
+
+void test_validate_lobster_replay_reductions_match() {
+    std::istringstream messages(
+        "1,1,1,10,100,1\n"
+        "2,2,1,4,100,1\n"
+        "3,1,2,10,110,-1\n"
+        "4,4,2,4,110,-1\n"
+    );
+    std::istringstream expected(
+        "9999999999,0,100,10\n"
+        "9999999999,0,100,6\n"
+        "110,10,100,6\n"
+        "110,6,100,6\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.matching_rows == 4);
+    CHECK(summary.replay.partial_cancels == 1);
+    CHECK(summary.replay.successful_cancels == 1);
+    CHECK(summary.replay.executions == 1);
+    CHECK(summary.replay.successful_execution_reductions == 1);
+}
+
+void test_validate_lobster_replay_price_and_quantity_mismatches() {
+    std::istringstream messages(
+        "1,1,1,10,100,1\n"
+        "2,1,2,5,110,-1\n"
+    );
+    std::istringstream expected(
+        "9999999999,0,99,9\n"
+        "111,4,100,10\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.mismatching_rows == 2);
+    CHECK(summary.price_mismatches == 2);
+    CHECK(summary.quantity_mismatches == 2);
+    CHECK(summary.first_mismatch->side == lob::LobsterBookSide::Bid);
+    CHECK(summary.first_mismatch->row == 1);
+}
+
+void test_validate_lobster_replay_missing_levels() {
+    std::istringstream messages(
+        "1,5,0,1,100,1\n"
+        "2,1,1,10,100,1\n"
+    );
+    std::istringstream expected(
+        "9999999999,0,100,10\n"
+        "9999999999,0,-9999999999,0\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.missing_level_mismatches == 2);
+    CHECK(summary.mismatching_rows == 2);
+    CHECK(summary.first_mismatch->expected.has_value());
+    CHECK(!summary.first_mismatch->actual.has_value());
+}
+
+void test_validate_lobster_replay_first_mismatch_details() {
+    std::istringstream messages("1,1,1,10,110,-1\n");
+    std::istringstream expected("111,9,-9999999999,0\n");
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.first_mismatch.has_value());
+    CHECK(summary.first_mismatch->row == 1);
+    CHECK(summary.first_mismatch->side == lob::LobsterBookSide::Ask);
+    CHECK(summary.first_mismatch->level == 1);
+    CHECK(summary.first_mismatch->expected->price == 111);
+    CHECK(summary.first_mismatch->expected->quantity == 9);
+    CHECK(summary.first_mismatch->actual->price == 110);
+    CHECK(summary.first_mismatch->actual->quantity == 10);
+}
+
+void test_validate_lobster_replay_counts_row_once_and_continues() {
+    std::istringstream messages(
+        "1,1,1,10,100,1\n"
+        "2,2,1,4,100,1\n"
+    );
+    std::istringstream expected(
+        "110,5,99,20\n"
+        "9999999999,0,100,5\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 1);
+
+    CHECK(summary.rows_compared == 2);
+    CHECK(summary.mismatching_rows == 2);
+    CHECK(summary.missing_level_mismatches == 1);
+    CHECK(summary.price_mismatches == 1);
+    CHECK(summary.quantity_mismatches == 2);
+    CHECK(summary.first_mismatch->row == 1);
+}
+
+void test_validate_lobster_replay_first_mismatch_level_two() {
+    std::istringstream messages("1,1,1,10,100,1\n");
+    std::istringstream expected(
+        "9999999999,0,100,10,9999999999,0,90,5\n"
+    );
+    lob::OrderBook book;
+    auto summary = lob::validate_lobster_replay(messages, expected, book, 2);
+
+    CHECK(summary.first_mismatch.has_value());
+    CHECK(summary.first_mismatch->row == 1);
+    CHECK(summary.first_mismatch->side == lob::LobsterBookSide::Bid);
+    CHECK(summary.first_mismatch->level == 2);
+    CHECK(summary.first_mismatch->expected->price == 90);
+    CHECK(summary.first_mismatch->expected->quantity == 5);
+    CHECK(!summary.first_mismatch->actual.has_value());
+}
+
+void test_validate_lobster_replay_rejects_stream_length_mismatch() {
+    check_lobster_validation_fails(
+        "1,1,1,10,100,1\n2,3,1,10,100,1\n",
+        "9999999999,0,100,10\n", 1,
+        "order-book stream ended before message stream"
+    );
+    check_lobster_validation_fails(
+        "1,1,1,10,100,1\n",
+        "9999999999,0,100,10\n9999999999,0,-9999999999,0\n", 1,
+        "message stream ended before order-book stream"
+    );
+}
+
+void test_validate_lobster_replay_reports_stream_context() {
+    check_lobster_validation_fails(
+        "bad\n", "9999999999,0,-9999999999,0\n", 1,
+        "message stream at row 1"
+    );
+    check_lobster_validation_fails(
+        "1,5,0,1,100,1\n", "bad\n", 1,
+        "order-book stream at row 1"
+    );
+    check_lobster_validation_fails(
+        "\n", "9999999999,0,-9999999999,0\n", 1,
+        "message stream at row 1"
+    );
+    check_lobster_validation_fails(
+        "1,5,0,1,100,1\n", "\n", 1,
+        "order-book stream at row 1"
+    );
+}
+
+void test_validate_lobster_replay_rejects_invalid_arguments() {
+    check_lobster_validation_fails("", "", 0, "depth must be greater than zero");
+
+    std::istringstream messages;
+    std::istringstream expected;
+    lob::OrderBook book;
+    book.add_order({1, lob::Side::Buy, 100, 10, 1});
+    bool threw = false;
+    try {
+        static_cast<void>(lob::validate_lobster_replay(
+            messages, expected, book, 1
+        ));
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        CHECK(std::string_view(error.what()).find("empty initial order book") !=
+              std::string_view::npos);
+    }
+    CHECK(threw);
+}
+
 int main() {
     test_replay_market_data_summary_and_book_state();
     test_lobster_partial_cancel_subtracts_event_quantity();
@@ -391,6 +627,18 @@ int main() {
     test_parse_lobster_book_row_rejects_depth_overflow();
     test_parse_lobster_book_row_rejects_bid_sentinel_on_ask_side();
     test_parse_lobster_book_row_rejects_ask_sentinel_on_bid_side();
+    test_validate_lobster_replay_exact_one_row_match();
+    test_validate_lobster_replay_exact_matches();
+    test_validate_lobster_replay_compares_after_each_event();
+    test_validate_lobster_replay_reductions_match();
+    test_validate_lobster_replay_price_and_quantity_mismatches();
+    test_validate_lobster_replay_missing_levels();
+    test_validate_lobster_replay_first_mismatch_details();
+    test_validate_lobster_replay_counts_row_once_and_continues();
+    test_validate_lobster_replay_first_mismatch_level_two();
+    test_validate_lobster_replay_rejects_stream_length_mismatch();
+    test_validate_lobster_replay_reports_stream_context();
+    test_validate_lobster_replay_rejects_invalid_arguments();
 
     std::cout << "All market data replay tests passed.\n";
 
