@@ -1,5 +1,6 @@
 #include "MarketDataReplay.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -223,6 +224,134 @@ Side lobster_direction_to_side(long direction, std::size_t line_number) {
     throw malformed_row(line_number, "invalid direction");
 }
 
+void apply_lobster_message_line(
+    const std::string& line,
+    std::size_t row,
+    OrderBook& book,
+    LobsterSummary& summary
+) {
+    auto fields = split_csv_line(line);
+
+    if (fields.size() < 6) {
+        throw malformed_row(row, "expected at least 6 fields");
+    }
+
+    Timestamp timestamp = parse_lobster_timestamp(fields[0], row);
+    long type = parse_lobster_int(fields[1], row, "type");
+    OrderId order_id = parse_order_id(fields[2], row);
+    Quantity size = parse_quantity(fields[3], row);
+    Price price = parse_price(fields[4], row);
+    long direction = parse_lobster_int(fields[5], row, "direction");
+
+    ++summary.events_processed;
+
+    switch (type) {
+        case 1: {
+            Order order{
+                order_id,
+                lobster_direction_to_side(direction, row),
+                price,
+                size,
+                timestamp
+            };
+            book.add_order(order);
+            ++summary.new_orders;
+            break;
+        }
+        case 2:
+            ++summary.partial_cancels;
+            switch (book.reduce_order(order_id, size)) {
+                case ReduceResult::Reduced:
+                case ReduceResult::Removed:
+                    ++summary.successful_cancels;
+                    break;
+                case ReduceResult::NotFound:
+                case ReduceResult::InvalidQuantity:
+                case ReduceResult::ExceedsQuantity:
+                    break;
+            }
+            break;
+        case 3:
+            ++summary.deletions;
+            if (book.cancel_order(order_id)) {
+                ++summary.successful_cancels;
+            }
+            break;
+        case 4:
+            ++summary.executions;
+            summary.executed_quantity += size;
+            switch (book.reduce_order(order_id, size)) {
+                case ReduceResult::Reduced:
+                case ReduceResult::Removed:
+                    ++summary.successful_execution_reductions;
+                    break;
+                case ReduceResult::NotFound:
+                case ReduceResult::InvalidQuantity:
+                case ReduceResult::ExceedsQuantity:
+                    break;
+            }
+            break;
+        case 5:
+            ++summary.hidden_executions;
+            break;
+        case 6:
+            ++summary.cross_trades;
+            break;
+        case 7:
+            ++summary.auxiliary;
+            break;
+        default:
+            throw malformed_row(row, "unknown LOBSTER event type");
+    }
+}
+
+void compare_lobster_side(
+    const std::vector<LevelSnapshot>& expected,
+    const std::vector<LevelSnapshot>& actual,
+    LobsterBookSide side,
+    std::size_t row,
+    LobsterValidationSummary& summary,
+    bool& row_matches
+) {
+    std::size_t level_count = std::max(expected.size(), actual.size());
+
+    for (std::size_t index = 0; index < level_count; ++index) {
+        std::optional<LevelSnapshot> expected_level;
+        std::optional<LevelSnapshot> actual_level;
+
+        if (index < expected.size()) {
+            expected_level = expected[index];
+        }
+        if (index < actual.size()) {
+            actual_level = actual[index];
+        }
+
+        bool level_mismatch = false;
+        if (!expected_level || !actual_level) {
+            ++summary.missing_level_mismatches;
+            level_mismatch = true;
+        } else {
+            if (expected_level->price != actual_level->price) {
+                ++summary.price_mismatches;
+                level_mismatch = true;
+            }
+            if (expected_level->quantity != actual_level->quantity) {
+                ++summary.quantity_mismatches;
+                level_mismatch = true;
+            }
+        }
+
+        if (level_mismatch) {
+            row_matches = false;
+            if (!summary.first_mismatch) {
+                summary.first_mismatch = LobsterValidationMismatch{
+                    row, side, index + 1, expected_level, actual_level
+                };
+            }
+        }
+    }
+}
+
 }  // namespace
 
 ReplaySummary replay_market_data(std::istream& input, OrderBook& book) {
@@ -297,89 +426,7 @@ LobsterSummary replay_lobster_data(std::istream& input, OrderBook& book) {
             continue;
         }
 
-        auto fields = split_csv_line(line);
-
-        if (fields.size() < 6) {
-            throw malformed_row(line_number, "expected at least 6 fields");
-        }
-
-        Timestamp timestamp = parse_lobster_timestamp(fields[0], line_number);
-        long type = parse_lobster_int(fields[1], line_number, "type");
-        OrderId order_id = parse_order_id(fields[2], line_number);
-        Quantity size = parse_quantity(fields[3], line_number);
-        Price price = parse_price(fields[4], line_number);
-        long direction = parse_lobster_int(fields[5], line_number, "direction");
-
-        ++summary.events_processed;
-
-        switch (type) {
-            case 1: {  // new limit order
-                Order order{
-                    order_id,
-                    lobster_direction_to_side(direction, line_number),
-                    price,
-                    size,
-                    timestamp
-                };
-                book.add_order(order);
-                ++summary.new_orders;
-                break;
-            }
-            case 2: {  // partial cancellation: reduce resting size
-                ++summary.partial_cancels;
-
-                switch (book.reduce_order(order_id, size)) {
-                    case ReduceResult::Reduced:
-                    case ReduceResult::Removed:
-                        ++summary.successful_cancels;
-                        break;
-                    case ReduceResult::NotFound:
-                    case ReduceResult::InvalidQuantity:
-                    case ReduceResult::ExceedsQuantity:
-                        break;
-                }
-
-                break;
-            }
-            case 3: {  // deletion (full cancel)
-                ++summary.deletions;
-                if (book.cancel_order(order_id)) {
-                    ++summary.successful_cancels;
-                }
-                break;
-            }
-            case 4: {  // visible execution: reduce the referenced resting order
-                ++summary.executions;
-                summary.executed_quantity += size;
-
-                switch (book.reduce_order(order_id, size)) {
-                    case ReduceResult::Reduced:
-                    case ReduceResult::Removed:
-                        ++summary.successful_execution_reductions;
-                        break;
-                    case ReduceResult::NotFound:
-                    case ReduceResult::InvalidQuantity:
-                    case ReduceResult::ExceedsQuantity:
-                        break;
-                }
-
-                break;
-            }
-            case 5: {  // hidden execution: not part of the visible book
-                ++summary.hidden_executions;
-                break;
-            }
-            case 6: {  // cross trade: not part of the visible book
-                ++summary.cross_trades;
-                break;
-            }
-            case 7: {  // trading halt / auxiliary
-                ++summary.auxiliary;
-                break;
-            }
-            default:
-                throw malformed_row(line_number, "unknown LOBSTER event type");
-        }
+        apply_lobster_message_line(line, line_number, book, summary);
     }
 
     return summary;
@@ -523,6 +570,93 @@ LobsterBookRow parse_lobster_book_row(
     }
 
     return row;
+}
+
+LobsterValidationSummary validate_lobster_replay(
+    std::istream& message_input,
+    std::istream& orderbook_input,
+    OrderBook& book,
+    std::size_t depth
+) {
+    if (depth == 0) {
+        throw std::runtime_error("LOBSTER validation depth must be greater than zero");
+    }
+    if (book.order_count() != 0) {
+        throw std::runtime_error(
+            "LOBSTER validation requires an empty initial order book"
+        );
+    }
+
+    LobsterValidationSummary summary;
+    std::string message_line;
+    std::string orderbook_line;
+    std::size_t row = 0;
+
+    while (true) {
+        bool has_message = static_cast<bool>(
+            std::getline(message_input, message_line)
+        );
+        bool has_orderbook = static_cast<bool>(
+            std::getline(orderbook_input, orderbook_line)
+        );
+
+        if (!has_message && !has_orderbook) {
+            break;
+        }
+
+        ++row;
+        if (!has_message) {
+            throw std::runtime_error(
+                "LOBSTER stream length mismatch at row " + std::to_string(row) +
+                ": message stream ended before order-book stream"
+            );
+        }
+        if (!has_orderbook) {
+            throw std::runtime_error(
+                "LOBSTER stream length mismatch at row " + std::to_string(row) +
+                ": order-book stream ended before message stream"
+            );
+        }
+
+        try {
+            apply_lobster_message_line(message_line, row, book, summary.replay);
+        } catch (const std::runtime_error& error) {
+            throw std::runtime_error(
+                "Malformed LOBSTER message stream at row " +
+                std::to_string(row) + ": " + error.what()
+            );
+        }
+
+        LobsterBookRow expected;
+        try {
+            expected = parse_lobster_book_row(orderbook_line, depth);
+        } catch (const std::runtime_error& error) {
+            throw std::runtime_error(
+                "Malformed LOBSTER order-book stream at row " +
+                std::to_string(row) + ": " + error.what()
+            );
+        }
+
+        BookSnapshot actual = book.snapshot(depth);
+        bool row_matches = true;
+        compare_lobster_side(
+            expected.bids, actual.bids, LobsterBookSide::Bid,
+            row, summary, row_matches
+        );
+        compare_lobster_side(
+            expected.asks, actual.asks, LobsterBookSide::Ask,
+            row, summary, row_matches
+        );
+
+        ++summary.rows_compared;
+        if (row_matches) {
+            ++summary.matching_rows;
+        } else {
+            ++summary.mismatching_rows;
+        }
+    }
+
+    return summary;
 }
 
 }  // namespace lob
