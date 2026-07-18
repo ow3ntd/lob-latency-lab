@@ -70,3 +70,22 @@ add_executable(lob_lobster_demo
     src/lob_lobster_demo.cpp
 )
 target_link_libraries(lob_lobster_demo PRIVATE lob)
+
+add_executable(lob_lobster_validate
+    src/lob_lobster_validate.cpp
+)
+
+target_link_libraries(lob_lobster_validate PRIVATE lob)
+
+add_test(
+    NAME lobster_validation_smoke
+    COMMAND lob_lobster_validate
+            data/sample_lobster_message.csv
+            data/sample_lobster_orderbook_2.csv
+            2
+)
+
+set_tests_properties(
+    lobster_validation_smoke
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
