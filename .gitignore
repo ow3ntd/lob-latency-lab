@@ -3,5 +3,4 @@ build/
 *.o
 *.out
 data/AAPL_2012-06-21_*_message_10.csv
-data/AAPL_2012-06-21_*_message_10.csv
-data/AAPL_2012-06-21_*_message_10.csv
+data/AAPL_2012-06-21_*_orderbook_10.csv
