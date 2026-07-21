@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <istream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -91,6 +92,42 @@ LobsterValidationSummary validate_lobster_replay(
     std::istream& message_input,
     std::istream& orderbook_input,
     OrderBook& book,
+    std::size_t depth
+);
+
+struct LobsterTransitionMismatch {
+    std::size_t row = 0;
+    long event_type = 0;
+    LobsterBookSide side = LobsterBookSide::Bid;
+    std::size_t level = 0;
+    Price event_price = 0;
+    Quantity event_size = 0;
+    std::string reason;
+    std::optional<LevelSnapshot> expected;
+    std::optional<LevelSnapshot> actual;
+};
+
+struct LobsterTransitionSummary {
+    std::size_t rows_read = 0;
+    std::size_t baseline_rows = 0;
+    std::size_t transitions_checked = 0;
+    std::size_t matching_transitions = 0;
+    std::size_t mismatching_transitions = 0;
+    std::size_t unsupported_transitions = 0;
+    std::size_t unverifiable_transitions = 0;
+    std::size_t opposite_side_changes = 0;
+    std::size_t missing_event_price_levels = 0;
+    std::size_t quantity_underflows = 0;
+    std::size_t tail_refill_transitions = 0;
+    std::size_t price_mismatches = 0;
+    std::size_t quantity_mismatches = 0;
+    std::size_t missing_level_mismatches = 0;
+    std::optional<LobsterTransitionMismatch> first_mismatch;
+};
+
+LobsterTransitionSummary validate_lobster_transitions(
+    std::istream& message_input,
+    std::istream& orderbook_input,
     std::size_t depth
 );
 

@@ -597,6 +597,75 @@ void test_validate_lobster_replay_rejects_invalid_arguments() {
     CHECK(threw);
 }
 
+lob::LobsterTransitionSummary transition_summary(std::string_view messages,
+                                                  std::string_view books,
+                                                  std::size_t depth) {
+    std::istringstream m{std::string(messages)}, b{std::string(books)};
+    return lob::validate_lobster_transitions(m, b, depth);
+}
+
+void test_lobster_transition_core_rules() {
+    auto s = transition_summary(
+        "1,5,0,1,1,0\n2,1,1,5,100,1\n3,1,2,5,110,1\n4,2,1,4,100,1\n",
+        "9999999999,0,100,10,9999999999,0,90,20\n"
+        "9999999999,0,100,15,9999999999,0,90,20\n"
+        "9999999999,0,110,5,9999999999,0,100,15\n"
+        "9999999999,0,110,5,9999999999,0,100,11\n", 2);
+    CHECK(s.baseline_rows == 1); CHECK(s.transitions_checked == 3);
+    CHECK(s.matching_transitions == 3);
+
+    auto outside = transition_summary(
+        "1,5,0,1,1,0\n2,1,1,5,80,1\n",
+        "9999999999,0,100,10,9999999999,0,90,20\n"
+        "9999999999,0,100,10,9999999999,0,90,20\n", 2);
+    CHECK(outside.matching_transitions == 1);
+}
+
+void test_lobster_transition_removal_and_tail_rules() {
+    auto exact = transition_summary(
+        "1,5,0,1,1,0\n2,4,1,10,100,1\n",
+        "9999999999,0,100,10,9999999999,0,90,20\n"
+        "9999999999,0,90,20,9999999999,0,-9999999999,0\n", 2);
+    CHECK(exact.matching_transitions == 1);
+    auto tail = transition_summary(
+        "1,5,0,1,1,0\n2,3,1,10,100,1\n3,5,0,1,1,0\n",
+        "9999999999,0,100,10,9999999999,0,90,20\n"
+        "9999999999,0,90,20,9999999999,0,80,30\n"
+        "9999999999,0,90,20,9999999999,0,80,30\n", 2);
+    CHECK(tail.unverifiable_transitions == 1); CHECK(tail.tail_refill_transitions == 1);
+    CHECK(tail.matching_transitions == 1);
+}
+
+void test_lobster_transition_absent_and_special_rules() {
+    auto full = transition_summary(
+        "1,5,0,1,1,0\n2,2,1,1,80,1\n",
+        "9999999999,0,100,10\n9999999999,0,100,10\n", 1);
+    CHECK(full.unverifiable_transitions == 1);
+    auto shallow = transition_summary(
+        "1,5,0,1,1,0\n2,2,1,1,80,1\n",
+        "9999999999,0,100,10,9999999999,0,-9999999999,0\n"
+        "9999999999,0,100,10,9999999999,0,-9999999999,0\n", 2);
+    CHECK(shallow.mismatching_transitions == 1);
+    CHECK(shallow.first_mismatch->reason == "event price absent from fully visible side");
+    CHECK(!shallow.first_mismatch->expected); CHECK(!shallow.first_mismatch->actual);
+    auto unsupported = transition_summary(
+        "1,5,0,1,1,0\n2,7,0,0,0,0\n",
+        "9999999999,0,-9999999999,0\n9999999999,0,-9999999999,0\n", 1);
+    CHECK(unsupported.unsupported_transitions == 1);
+}
+
+void test_lobster_transition_errors_and_accounting() {
+    bool threw=false; try { transition_summary("1,8,0,1,1,0\n","9999999999,0,-9999999999,0\n",1); }
+    catch(const std::runtime_error& e){threw=true; CHECK(std::string_view(e.what()).find("message stream at row 1")!=std::string_view::npos);} CHECK(threw);
+    threw=false; try { transition_summary("\n","9999999999,0,-9999999999,0\n",1); }
+    catch(const std::runtime_error&){threw=true;} CHECK(threw);
+    auto s=transition_summary(
+        "1,5,0,1,1,0\n2,5,0,1,1,0\n3,6,0,1,1,0\n4,2,1,1,80,1\n",
+        "9999999999,0,100,10\n9999999999,0,100,10\n9999999999,0,100,10\n9999999999,0,100,10\n",1);
+    CHECK(s.matching_transitions==1); CHECK(s.unsupported_transitions==1); CHECK(s.unverifiable_transitions==1);
+    CHECK(s.matching_transitions+s.mismatching_transitions+s.unsupported_transitions+s.unverifiable_transitions==s.transitions_checked);
+}
+
 int main() {
     test_replay_market_data_summary_and_book_state();
     test_lobster_partial_cancel_subtracts_event_quantity();
@@ -639,6 +708,10 @@ int main() {
     test_validate_lobster_replay_rejects_stream_length_mismatch();
     test_validate_lobster_replay_reports_stream_context();
     test_validate_lobster_replay_rejects_invalid_arguments();
+    test_lobster_transition_core_rules();
+    test_lobster_transition_removal_and_tail_rules();
+    test_lobster_transition_absent_and_special_rules();
+    test_lobster_transition_errors_and_accounting();
 
     std::cout << "All market data replay tests passed.\n";
 
