@@ -24,6 +24,8 @@ struct ParsedLobsterMessage {
     long direction;
 };
 
+enum class TransitionClassification { Matching, Mismatching, Unsupported, Unverifiable };
+
 std::vector<std::string> split_csv_line(const std::string& line) {
     std::vector<std::string> fields;
     std::istringstream stream(line);
@@ -341,6 +343,156 @@ void validate_transition_message_semantics(const ParsedLobsterMessage& message,
         default:
             throw malformed_row(row, "unknown LOBSTER event type");
     }
+}
+
+bool is_potentially_off_depth(
+    LobsterBookSide side, Price event_price,
+    const std::vector<LevelSnapshot>& previous_side, std::size_t depth) {
+    if (previous_side.empty() || previous_side.size() != depth) {
+        return false;
+    }
+    return side == LobsterBookSide::Bid
+        ? event_price < previous_side.back().price
+        : event_price > previous_side.back().price;
+}
+
+const std::vector<LevelSnapshot>& transition_levels(
+    const LobsterBookRow& row, LobsterBookSide side) {
+    return side == LobsterBookSide::Bid ? row.bids : row.asks;
+}
+
+LobsterBookSide opposite_side(LobsterBookSide side) {
+    return side == LobsterBookSide::Bid ? LobsterBookSide::Ask : LobsterBookSide::Bid;
+}
+
+void capture_transition_mismatch(
+    LobsterTransitionSummary& summary, const ParsedLobsterMessage& message,
+    std::size_t row, LobsterBookSide side, std::size_t level,
+    const std::string& reason, std::optional<LevelSnapshot> expected,
+    std::optional<LevelSnapshot> actual) {
+    if (!summary.first_mismatch) {
+        summary.first_mismatch = LobsterTransitionMismatch{
+            row, message.type, side, level, message.price, message.size,
+            reason, expected, actual
+        };
+    }
+}
+
+bool compare_transition_side(
+    const std::vector<LevelSnapshot>& expected,
+    const std::vector<LevelSnapshot>& actual, LobsterBookSide side,
+    const ParsedLobsterMessage& message, std::size_t row,
+    LobsterTransitionSummary& summary, const char* override_reason = nullptr) {
+    bool matches = true;
+    for (std::size_t i = 0; i < std::max(expected.size(), actual.size()); ++i) {
+        std::optional<LevelSnapshot> e = i < expected.size()
+            ? std::optional<LevelSnapshot>(expected[i]) : std::nullopt;
+        std::optional<LevelSnapshot> a = i < actual.size()
+            ? std::optional<LevelSnapshot>(actual[i]) : std::nullopt;
+        if (!e || !a) {
+            ++summary.missing_level_mismatches; matches = false;
+            capture_transition_mismatch(summary, message, row, side, i + 1,
+                override_reason ? override_reason : (e ? "missing actual level" : "unexpected actual level"), e, a);
+            continue;
+        }
+        if (e->price != a->price) {
+            ++summary.price_mismatches; matches = false;
+            capture_transition_mismatch(summary, message, row, side, i + 1,
+                override_reason ? override_reason : "price mismatch", e, a);
+        }
+        if (e->quantity != a->quantity) {
+            ++summary.quantity_mismatches; matches = false;
+            capture_transition_mismatch(summary, message, row, side, i + 1,
+                override_reason ? override_reason : "quantity mismatch", e, a);
+        }
+    }
+    return matches;
+}
+
+void classify_transition(LobsterTransitionSummary& summary,
+                         TransitionClassification classification) {
+    switch (classification) {
+        case TransitionClassification::Matching: ++summary.matching_transitions; break;
+        case TransitionClassification::Mismatching: ++summary.mismatching_transitions; break;
+        case TransitionClassification::Unsupported: ++summary.unsupported_transitions; break;
+        case TransitionClassification::Unverifiable: ++summary.unverifiable_transitions; break;
+    }
+}
+
+TransitionClassification validate_submission_transition(
+    const ParsedLobsterMessage& m, std::size_t row, std::size_t depth,
+    const LobsterBookRow& previous, const LobsterBookRow& current,
+    LobsterTransitionSummary& summary) {
+    auto side = m.direction == 1 ? LobsterBookSide::Bid : LobsterBookSide::Ask;
+    auto other = opposite_side(side); bool mismatch = false;
+    if (!compare_transition_side(transition_levels(previous, other), transition_levels(current, other), other, m, row, summary, "opposite side changed")) {
+        ++summary.opposite_side_changes; mismatch = true;
+    }
+    auto predicted = transition_levels(previous, side);
+    auto it = std::find_if(predicted.begin(), predicted.end(), [&](const auto& l){ return l.price == m.price; });
+    if (it != predicted.end()) it->quantity += m.size;
+    else {
+        auto pos = std::find_if(predicted.begin(), predicted.end(), [&](const auto& l){ return side == LobsterBookSide::Bid ? m.price > l.price : m.price < l.price; });
+        predicted.insert(pos, {m.price, m.size});
+    }
+    if (predicted.size() > depth) predicted.resize(depth);
+    if (!compare_transition_side(predicted, transition_levels(current, side), side, m, row, summary)) mismatch = true;
+    return mismatch ? TransitionClassification::Mismatching : TransitionClassification::Matching;
+}
+
+TransitionClassification validate_reduction_transition(
+    const ParsedLobsterMessage& m, std::size_t row, std::size_t depth,
+    const LobsterBookRow& previous, const LobsterBookRow& current,
+    LobsterTransitionSummary& summary) {
+    auto side = m.direction == 1 ? LobsterBookSide::Bid : LobsterBookSide::Ask;
+    auto other = opposite_side(side); bool mismatch = false;
+    if (!compare_transition_side(transition_levels(previous, other), transition_levels(current, other), other, m, row, summary, "opposite side changed")) {
+        ++summary.opposite_side_changes; mismatch = true;
+    }
+    const auto& prev = transition_levels(previous, side);
+    const auto& cur = transition_levels(current, side);
+    auto it = std::find_if(prev.begin(), prev.end(), [&](const auto& l){ return l.price == m.price; });
+    if (it == prev.end()) {
+        ++summary.missing_event_price_levels;
+        if (!is_potentially_off_depth(side, m.price, prev, depth)) {
+            capture_transition_mismatch(summary, m, row, side, 0, "event price absent from visible price range", std::nullopt, std::nullopt);
+            compare_transition_side(prev, cur, side, m, row, summary);
+            return TransitionClassification::Mismatching;
+        }
+        bool unchanged = compare_transition_side(prev, cur, side, m, row, summary, "off-depth reduction cannot account for visible-book change");
+        return !mismatch && unchanged ? TransitionClassification::Unverifiable : TransitionClassification::Mismatching;
+    }
+    std::size_t index = static_cast<std::size_t>(it - prev.begin());
+    if (m.size > it->quantity) {
+        ++summary.quantity_underflows;
+        capture_transition_mismatch(summary, m, row, side, index + 1, "event quantity exceeds previous visible level quantity", *it, index < cur.size() ? std::optional<LevelSnapshot>(cur[index]) : std::nullopt);
+        return TransitionClassification::Mismatching;
+    }
+    auto predicted = prev; predicted[index].quantity -= m.size;
+    if (predicted[index].quantity > 0) {
+        if (!compare_transition_side(predicted, cur, side, m, row, summary)) mismatch = true;
+        return mismatch ? TransitionClassification::Mismatching : TransitionClassification::Matching;
+    }
+    predicted.erase(predicted.begin() + index);
+    if (prev.size() < depth) {
+        if (!compare_transition_side(predicted, cur, side, m, row, summary)) mismatch = true;
+        return mismatch ? TransitionClassification::Mismatching : TransitionClassification::Matching;
+    }
+    bool count_ok = cur.size() == predicted.size() || cur.size() == predicted.size() + 1;
+    std::vector<LevelSnapshot> prefix(cur.begin(), cur.begin() + std::min(cur.size(), predicted.size()));
+    bool prefix_ok = compare_transition_side(predicted, prefix, side, m, row, summary, "invalid known prefix after visible-level removal");
+    if (!count_ok || !prefix_ok || mismatch) return TransitionClassification::Mismatching;
+    if (cur.size() == predicted.size() + 1) { ++summary.tail_refill_transitions; return TransitionClassification::Unverifiable; }
+    return TransitionClassification::Matching;
+}
+
+TransitionClassification validate_hidden_transition(
+    const ParsedLobsterMessage& m, std::size_t row,
+    const LobsterBookRow& previous, const LobsterBookRow& current,
+    LobsterTransitionSummary& summary) {
+    bool bids_match = compare_transition_side(previous.bids, current.bids, LobsterBookSide::Bid, m, row, summary);
+    bool asks_match = compare_transition_side(previous.asks, current.asks, LobsterBookSide::Ask, m, row, summary);
+    return bids_match && asks_match ? TransitionClassification::Matching : TransitionClassification::Mismatching;
 }
 
 void compare_lobster_side(
@@ -700,10 +852,13 @@ LobsterValidationSummary validate_lobster_replay(
 LobsterTransitionSummary validate_lobster_transitions(
     std::istream& message_input, std::istream& orderbook_input,
     std::size_t depth) {
-    if (depth == 0) throw std::runtime_error("LOBSTER transition validation depth must be greater than zero");
+    if (depth == 0) {
+        throw std::runtime_error("LOBSTER transition validation depth must be greater than zero");
+    }
     LobsterTransitionSummary s;
     std::optional<LobsterBookRow> previous;
-    std::string ml, bl;
+    std::string ml;
+    std::string bl;
     std::size_t row = 0;
     while (true) {
         bool hm = static_cast<bool>(std::getline(message_input, ml));
@@ -713,7 +868,10 @@ LobsterTransitionSummary validate_lobster_transitions(
         if (!hm) throw std::runtime_error("LOBSTER stream length mismatch at row " + std::to_string(row) + ": message stream ended before order-book stream");
         if (!hb) throw std::runtime_error("LOBSTER stream length mismatch at row " + std::to_string(row) + ": order-book stream ended before message stream");
         ParsedLobsterMessage m;
-        try { m = parse_lobster_message(ml, row); validate_transition_message_semantics(m, row); }
+        try {
+            m = parse_lobster_message(ml, row);
+            validate_transition_message_semantics(m, row);
+        }
         catch (const std::runtime_error& e) { throw std::runtime_error("Malformed LOBSTER message stream at row " + std::to_string(row) + ": " + e.what()); }
         LobsterBookRow current;
         try { current = parse_lobster_book_row(bl, depth); }
@@ -721,54 +879,13 @@ LobsterTransitionSummary validate_lobster_transitions(
         ++s.rows_read;
         if (!previous) { previous = std::move(current); ++s.baseline_rows; continue; }
         ++s.transitions_checked;
-        enum class C { Match, Mismatch, Unsupported, Unverifiable } cls = C::Match;
-        auto side = m.direction == 1 ? LobsterBookSide::Bid : LobsterBookSide::Ask;
-        auto levels = [](const LobsterBookRow& r, LobsterBookSide x) -> const std::vector<LevelSnapshot>& { return x == LobsterBookSide::Bid ? r.bids : r.asks; };
-        auto other = side == LobsterBookSide::Bid ? LobsterBookSide::Ask : LobsterBookSide::Bid;
-        auto capture = [&](LobsterBookSide x, std::size_t level, const char* reason, std::optional<LevelSnapshot> e, std::optional<LevelSnapshot> a) {
-            if (!s.first_mismatch) s.first_mismatch = LobsterTransitionMismatch{row,m.type,x,level,m.price,m.size,reason,e,a};
-        };
-        auto compare = [&](const std::vector<LevelSnapshot>& e, const std::vector<LevelSnapshot>& a, LobsterBookSide x, const char* override_reason = nullptr) {
-            bool ok = true; std::size_t n = std::max(e.size(), a.size());
-            for (std::size_t i=0;i<n;++i) {
-                std::optional<LevelSnapshot> ev = i<e.size()?std::optional<LevelSnapshot>(e[i]):std::nullopt;
-                std::optional<LevelSnapshot> av = i<a.size()?std::optional<LevelSnapshot>(a[i]):std::nullopt;
-                if (!ev || !av) { ++s.missing_level_mismatches; ok=false; capture(x,i+1,override_reason?override_reason:(ev?"missing actual level":"unexpected actual level"),ev,av); continue; }
-                if (ev->price != av->price) { ++s.price_mismatches; ok=false; capture(x,i+1,override_reason?override_reason:"price mismatch",ev,av); }
-                if (ev->quantity != av->quantity) { ++s.quantity_mismatches; ok=false; capture(x,i+1,override_reason?override_reason:"quantity mismatch",ev,av); }
-            } return ok;
-        };
-        if (m.type == 6 || m.type == 7) cls = C::Unsupported;
-        else if (m.type == 5) {
-            cls = compare(previous->bids,current.bids,LobsterBookSide::Bid) && compare(previous->asks,current.asks,LobsterBookSide::Ask) ? C::Match : C::Mismatch;
-        } else {
-            bool mismatch = false;
-            if (!compare(levels(*previous,other),levels(current,other),other,"opposite side changed")) { ++s.opposite_side_changes; mismatch=true; }
-            const auto& prev = levels(*previous,side); const auto& cur = levels(current,side);
-            if (m.type == 1) {
-                std::vector<LevelSnapshot> predicted=prev; auto it=std::find_if(predicted.begin(),predicted.end(),[&](auto& l){return l.price==m.price;});
-                if(it!=predicted.end()) it->quantity+=m.size; else { auto pos=std::find_if(predicted.begin(),predicted.end(),[&](auto& l){return side==LobsterBookSide::Bid?m.price>l.price:m.price<l.price;}); predicted.insert(pos,{m.price,m.size}); }
-                if(predicted.size()>depth) predicted.resize(depth); if(!compare(predicted,cur,side)) mismatch=true; cls=mismatch?C::Mismatch:C::Match;
-            } else {
-                auto it=std::find_if(prev.begin(),prev.end(),[&](auto& l){return l.price==m.price;});
-                if(it==prev.end()) {
-                    ++s.missing_event_price_levels;
-                    if(prev.size()<depth) { capture(side,0,"event price absent from fully visible side",std::nullopt,std::nullopt); compare(prev,cur,side); cls=C::Mismatch; }
-                    else { bool event_same=compare(prev,cur,side,"off-depth reduction cannot account for visible-book change"); cls=(!mismatch&&event_same)?C::Unverifiable:C::Mismatch; }
-                } else if(m.size>it->quantity) { ++s.quantity_underflows; capture(side,static_cast<std::size_t>(it-prev.begin())+1,"event quantity exceeds previous visible level quantity",*it,std::nullopt); cls=C::Mismatch; }
-                else { std::vector<LevelSnapshot> predicted=prev; auto index=static_cast<std::size_t>(it-prev.begin()); predicted[index].quantity-=m.size;
-                    if(predicted[index].quantity>0) { if(!compare(predicted,cur,side)) mismatch=true; cls=mismatch?C::Mismatch:C::Match; }
-                    else { predicted.erase(predicted.begin()+index);
-                        if(prev.size()<depth) { if(!compare(predicted,cur,side)) mismatch=true; cls=mismatch?C::Mismatch:C::Match; }
-                        else { bool count_ok=cur.size()==predicted.size()||cur.size()==predicted.size()+1; std::vector<LevelSnapshot> prefix(cur.begin(),cur.begin()+std::min(cur.size(),predicted.size())); bool prefix_ok=compare(predicted,prefix,side,"invalid known prefix after visible-level removal");
-                            if(!count_ok||!prefix_ok||mismatch) cls=C::Mismatch; else if(cur.size()==predicted.size()+1) { ++s.tail_refill_transitions; cls=C::Unverifiable; } else cls=C::Match;
-                        }
-                    }
-                }
-            }
-        }
-        if(cls==C::Match)++s.matching_transitions; else if(cls==C::Mismatch)++s.mismatching_transitions; else if(cls==C::Unsupported)++s.unsupported_transitions; else ++s.unverifiable_transitions;
-        previous=std::move(current);
+        TransitionClassification classification;
+        if (m.type == 1) classification = validate_submission_transition(m, row, depth, *previous, current, s);
+        else if (m.type >= 2 && m.type <= 4) classification = validate_reduction_transition(m, row, depth, *previous, current, s);
+        else if (m.type == 5) classification = validate_hidden_transition(m, row, *previous, current, s);
+        else classification = TransitionClassification::Unsupported;
+        classify_transition(s, classification);
+        previous = std::move(current);
     }
     return s;
 }
