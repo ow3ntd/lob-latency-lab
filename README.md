@@ -8,7 +8,7 @@ A C++20 limit order book and matching engine built for measurable low-latency pe
 
 - **Depth-independent cancellation.** Replaced an O(n) vector-scan cancel with an intrusive doubly-linked list backed by a contiguous slot pool. Per-cancel cost dropped from ~46,700 ns to ~26 ns at 80,000 resting orders — flat across all book depths.
 - **Percentile latency, not just averages.** Dedicated benchmarks report p50 / p95 / p99 per-event latency alongside aggregate throughput. Historical baselines are retained with their implementation context in [`results/`](results/).
-- **Real-data replay path.** Parses and replays LOBSTER message files with in-place partial cancellations, visible-execution quantity reductions, and explicit handling for hidden executions and cross trades. Exact row-by-row comparison against paired LOBSTER order-book snapshots is the next validation milestone.
+- **Real-data validation path.** Parses LOBSTER message files and validates each local transition against the paired order-book snapshots. On the official AAPL Level-10 sample, 295,828 transitions matched exactly, 104,562 were conservatively classified as unverifiable tail refills, and zero observable mismatches were found.
 - **Engineering process on record.** A [development log](docs/devlog.md) documents design decisions, including a cancellation optimization that was benchmarked, found slower, reverted, re-diagnosed, and then redesigned correctly.
 
 ## What This Is (and Isn't)
@@ -98,11 +98,65 @@ The engine replays [LOBSTER](https://lobsterdata.com) message files—reconstruc
 
 LOBSTER timestamps are parsed with fixed-point arithmetic rather than floating point.
 
-Current checks establish parser coverage, event-handling coverage, order-id bookkeeping diagnostics, and basic top-of-book sanity. They do not establish exact reconstruction of the LOBSTER visible book. Row-by-row comparison against paired LOBSTER order-book snapshots is planned.
+The project provides two paired-file validators with different starting
+assumptions:
 
-LOBSTER's academic license does not permit redistribution, so the raw data file is excluded from version control. A small synthetic sample in the same format (`data/sample_lobster_message.csv`) is committed as a reproducible example. [`results/lobster_replay_summary.md`](results/lobster_replay_summary.md) documents the historical full-session run, its limitations, and the command used to run it.
+- `lob_lobster_validate` attempts full reconstruction from an empty
+  `OrderBook`, applying every message before comparing the resulting snapshot.
+- `lob_lobster_transition_validate` treats order-book row 1 as an authoritative
+  baseline and checks whether message row k explains the transition from
+  order-book row k-1 to row k.
 
-The full-session numbers currently documented in that report predate the corrected type-2 and type-4 quantity semantics. They are retained only as a historical parser-coverage run and must not be treated as current reconstruction-validation results.
+The local transition model is necessary because the regular-session LOBSTER
+message file does not contain all resting orders established before row 1.
+Consequently, it cannot reconstruct the first regular-session snapshot from an
+empty book.
+
+Run the empty-start validator against paired files with:
+
+```bash
+./build/lob_lobster_validate <message.csv> <orderbook.csv> <depth>
+```
+
+Run the local transition validator with:
+
+```bash
+./build/lob_lobster_transition_validate <message.csv> <orderbook.csv> <depth>
+```
+
+### AAPL Level-10 transition-validation result
+
+| Classification | Count | Percentage |
+|---|---:|---:|
+| Exact matching transitions | 295,828 | 73.88% |
+| Unverifiable tail refills | 104,562 | 26.12% |
+| Observable mismatches | 0 | 0.00% |
+| Total transitions checked | 400,390 | 100.00% |
+
+The run read 400,391 paired rows: one authoritative baseline and 400,390
+checked transitions. Tail refills are conservative classifications, not
+mismatches: when a visible top-10 level disappears, a previously hidden level
+may enter position 10 even though its prior price and quantity were unavailable
+to the validator. The validator checks the known prefix but does not claim to
+validate that unknown depth.
+
+See
+[`results/lobster_transition_validation.md`](results/lobster_transition_validation.md)
+for the dataset identity, environment, exact command, complete counters, and
+limitations.
+
+LOBSTER's academic license does not permit redistribution, so the raw data
+files are excluded from version control. Small synthetic files in the same
+formats (`data/sample_lobster_message.csv` and
+`data/sample_lobster_orderbook_2.csv`) are committed as reproducible examples.
+[`results/lobster_replay_summary.md`](results/lobster_replay_summary.md)
+documents the historical message-only replay, its limitations, and the command
+used to run it.
+
+The full-session numbers in the historical replay report predate the corrected
+type-2 and type-4 quantity semantics. They are retained only as a historical
+parser-coverage run and must not be treated as current reconstruction-validation
+results.
 
 ## Build and Test
 
@@ -142,6 +196,7 @@ Tests are dependency-free suites using an always-active `CHECK` mechanism that r
 - linked-list edge cases introduced by the slot-pool design: cancelling head, tail, middle (FIFO priority preserved), and sole order at a level
 - slot reuse under heavy add/cancel churn
 - CSV and LOBSTER replay parsing via in-memory streams
+- paired LOBSTER full-replay and local transition-validation behavior
 
 ## Development Log
 
@@ -155,8 +210,13 @@ Design decisions, benchmark-driven experiments (including the reverted one), and
 - [x] Throughput and percentile latency benchmarks
 - [x] O(log P) + O(1) cancellation via contiguous slot pool
 - [x] LOBSTER message-file replay
-- [ ] Paired LOBSTER order-book snapshot comparison
+- [x] Paired LOBSTER order-book snapshot and local transition validation
 - [x] CMake/CTest CI: build all targets, require registered tests, and run one aggregate benchmark smoke test
-- [ ] Lock-free SPSC queue between data ingestion and matching thread
-- [ ] Arena allocation for trade output on the hot path
 - [ ] Re-baseline throughput/latency benchmarks post slot-pool redesign
+
+### Optional future experiments
+
+These are outside the completed v1 scope:
+
+- Lock-free SPSC ingestion between dedicated producer and matching threads
+- Arena-backed trade-result allocation

@@ -134,3 +134,51 @@ One honest caveat on the claim: the slot unlink itself is O(1), but cancellation
 I also added targeted tests for the cases the linked-list structure introduces: cancelling from the middle of a price level and confirming FIFO priority is preserved for the remaining orders, cancelling head and tail nodes, cancelling the only order so the price level is removed, and heavy add/cancel churn to confirm slot reuse does not corrupt the pool.
 
 Next step: replay a real depth-of-book dataset (LOBSTER) instead of only synthetic events, and add a lock-free single-producer/single-consumer queue between market data ingestion and the order book.
+
+## 2026-07-22 — Paired LOBSTER Transition Validation
+
+The first paired-file validator attempted to reconstruct the regular-session
+book from an empty `OrderBook`. Against the official AAPL Level-10 sample it
+mismatched immediately: order-book row 1 already contained resting levels whose
+submission events were not present in the regular-session message file. This
+was a starting-state problem, not something that should be hidden by inventing
+synthetic production orders.
+
+I added a local transition validator that treats order-book row 1 as an
+authoritative baseline. For every subsequent row k, it checks:
+
+```text
+order-book row k-1
+        + message row k
+        -> order-book row k
+```
+
+The validator classifies every checked transition as matching, mismatching,
+unsupported, or unverifiable. It advances the authoritative baseline after
+every syntactically valid row, so one mismatch or conservative classification
+does not cascade into later comparisons.
+
+The completed correctness-validation run used the official public AAPL
+2012-06-21 Level-10 message and order-book files. It read 400,391 paired rows:
+
+- 1 authoritative baseline row
+- 400,390 transitions checked
+- 295,828 exact matches (73.88%)
+- 0 observable mismatches (0.00%)
+- 0 unsupported transitions
+- 104,562 unverifiable transitions (26.12%)
+
+All 104,562 unverifiable transitions were conservative tail-refill cases. When
+a visible top-10 level disappeared, the first nine known levels matched but a
+previously hidden deeper level entered position 10. Because that new tail
+level's prior price and quantity were not visible in row k-1, the validator
+does not claim to have reconstructed it.
+
+This result validates observable aggregate top-10 transitions for this sample.
+It does not establish empty-start reconstruction, unknown hidden depth,
+individual order IDs from aggregate snapshots, or production exchange
+equivalence. The run was a correctness check; its shell runtime was not
+recorded as a performance benchmark.
+
+Full environment, command, counters, and limitations are recorded in
+`results/lobster_transition_validation.md`.
