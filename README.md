@@ -6,7 +6,7 @@ A C++20 limit order book and matching engine built for measurable low-latency pe
 
 ## Highlights
 
-- **Depth-independent cancellation.** Replaced an O(n) vector-scan cancel with an intrusive doubly-linked list backed by a contiguous slot pool. Per-cancel cost dropped from ~46,700 ns to ~26 ns at 80,000 resting orders — flat across all book depths.
+- **Flat cancellation scaling over tested depths.** Replaced O(n) vector shifting within a price level with an intrusive doubly-linked list backed by a contiguous slot pool. Current local synthetic measurements show approximately 14–18 ns median cancellation cost across 5,000 to 80,000 resting orders.
 - **Percentile latency, not just averages.** Dedicated benchmarks report p50 / p95 / p99 per-event latency alongside aggregate throughput. Historical baselines are retained with their implementation context in [`results/`](results/).
 - **Real-data validation path.** Parses LOBSTER message files and validates each local transition against the paired order-book snapshots. On the official AAPL Level-10 sample, 295,828 transitions matched exactly, 104,562 were conservatively classified as unverifiable tail refills, and zero observable mismatches were found.
 - **Engineering process on record.** A [development log](docs/devlog.md) documents design decisions, including a cancellation optimization that was benchmarked, found slower, reverted, re-diagnosed, and then redesigned correctly.
@@ -50,11 +50,34 @@ The first attempt at direct-index cancellation used `std::list` and was *slower*
 
 ## Performance
 
-Recorded results were measured on a MacBook Pro with Apple clang++ and `-O3 -DNDEBUG`. Results are retained with implementation-specific status and limitations in [`results/`](results/), with baselines tracked over time in [`results/performance_history.md`](results/performance_history.md).
+The current measurements are local synthetic microbenchmarks from a CMake
+Release build on an Apple M4 MacBook Pro. Each executable had one discarded
+warm-up followed by five measured trials. The machine was otherwise
+uncontrolled.
 
-The aggregate-throughput and percentile-latency figures below are historical baselines that predate the slot-pool cancellation redesign. They are not measurements of the current implementation.
+| Metric | Current five-run median |
+|---|---:|
+| Aggregate throughput | ~33.9M events/s |
+| Aggregate average cost | ~29.5 ns/event |
+| Per-event p50 latency | 42 ns |
+| Per-event p95 latency | 83 ns |
+| Per-event p99 latency | 84 ns |
+| Cancellation cost, 5,000–80,000 resting orders | ~14–18 ns median |
 
-### Cancellation scaling (2026-07-07, slot-pool redesign)
+These results characterize deterministic workloads on one local machine. They
+are not production exchange measurements and are not intended for
+cross-machine comparison. See
+[`results/current_performance.md`](results/current_performance.md) for the
+environment, commands, raw trials, ranges, methodology, and workload details.
+Historical baselines remain in
+[`results/performance_history.md`](results/performance_history.md).
+
+The approximately flat cancellation medians are consistent with the slot
+pool's O(1) unlink operation. The complete cancellation API also performs
+identifier and price-map lookups, so it is not claimed to be mathematically
+constant-time in every component.
+
+### Historical cancellation scaling (2026-07-07)
 
 `bench_cancel_stress` rests N orders at one price level and cancels all of them front-to-back — the worst case for a position-shifting cancel.
 
@@ -68,9 +91,11 @@ The aggregate-throughput and percentile-latency figures below are historical bas
 
 The old cost doubles as the book doubles (the O(n) signature); the new cost is flat. The speedup grows with depth — ~68x at 5,000 orders to ~1,760x at 80,000 — which is what removing an algorithmic bottleneck looks like, rather than a constant-factor tweak.
 
-### Throughput (1,000,000-event synthetic workload)
+### Historical aggregate baseline
 
-| Metric | Result (avg of 3 runs) |
+The following aggregate and percentile figures predate the slot-pool redesign.
+
+| Metric | Historical result (avg of 3 runs) |
 |---|---:|
 | Events per second | ~24.5M |
 | Avg cost per event | ~40.8 ns |
@@ -78,7 +103,7 @@ The old cost doubles as the book doubles (the O(n) signature); the new cost is f
 
 ### Per-event latency (100,000-event workload)
 
-| Percentile | Latency |
+| Percentile | Historical latency |
 |---|---:|
 | p50 | 42 ns |
 | p95 | 84 ns |
@@ -212,7 +237,7 @@ Design decisions, benchmark-driven experiments (including the reverted one), and
 - [x] LOBSTER message-file replay
 - [x] Paired LOBSTER order-book snapshot and local transition validation
 - [x] CMake/CTest CI: build all targets, require registered tests, and run one aggregate benchmark smoke test
-- [ ] Re-baseline throughput/latency benchmarks post slot-pool redesign
+- [x] Re-baseline throughput/latency benchmarks post slot-pool redesign
 
 ### Optional future experiments
 
