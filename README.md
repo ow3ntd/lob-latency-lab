@@ -64,6 +64,13 @@ uncontrolled.
 | Batched per-event cost, p99 | 47.20 ns/event (38.41–54.37) |
 | Cancellation cost, 5,000–80,000 resting orders | ~14–18 ns median |
 
+Per-event percentiles are computed over 128-event batches across five trials,
+with the first process invocation discarded. Each value is the mean per-event
+cost within a batch, not the latency of an individual event — batching
+smooths the per-event tail by construction. The reason is in the devlog: this
+machine's clock ticks at ~41.67 ns, which is longer than the operation being
+measured.
+
 These results characterize deterministic workloads on one local machine. They
 are not production exchange measurements and are not intended for
 cross-machine comparison. See
@@ -102,6 +109,12 @@ The following aggregate and percentile figures predate the slot-pool redesign.
 | Trades generated | 250,000 |
 
 ### Per-event latency (100,000-event workload)
+
+> **Superseded — measurement artifact.** These historical percentiles are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`docs/devlog.md`](docs/devlog.md).
 
 | Percentile | Historical latency |
 |---|---:|
