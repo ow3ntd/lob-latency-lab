@@ -116,7 +116,9 @@ Command:
 ### Notes
 
 - Throughput and latency are measured separately.
-- The latency benchmark times each event individually, so it has extra measurement overhead.
+- The old latency benchmark timed each event individually, which put every
+sample below the clock's ~41.67 ns resolution. The reported percentiles were
+tick counts, not measurements. See the 2026-07-30 devlog entry.
 - The workload is deterministic and synthetic.
 - These numbers are intended as a baseline for future optimization work.
 - This older baseline predates the slot-pool implementation and used a
