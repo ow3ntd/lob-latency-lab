@@ -182,3 +182,83 @@ recorded as a performance benchmark.
 
 Full environment, command, counters, and limitations are recorded in
 `results/lobster_transition_validation.md`.
+
+## 2026-07-30 — The percentile benchmark was measuring the clock
+
+### Symptom
+
+`bench_order_book_latency` reported p50 = 42 ns while `bench_order_book`
+reported an aggregate average of 29.5 ns/event over the same four-event
+cycle. A median above the mean for a single operation is not physically
+sensible, so one of the two was wrong.
+
+The shape was suspicious too: p50 42, p95 83, p99 84. Across runs p95
+flipped between exactly 42 and exactly 83 and never landed between them.
+
+### Diagnosis
+
+42 is approximately 1 x 41.67 and 83 is approximately 2 x 41.67. Apple
+Silicon's mach timebase is 125/3 ns per tick.
+
+A direct probe of 200,000 back-to-back `steady_clock::now()` reads
+returned 99,792 zero-delta pairs and a smallest nonzero delta of 41 ns.
+The clock cannot resolve an interval shorter than one tick, and the
+operation costs roughly 30 ns, which is below one tick. The old loop
+took two clock reads around each individual event, so every sample was
+a tick count rather than a duration.
+
+### Why not a better timer
+
+There is no `rdtsc` equivalent here. `CNTVCT_EL0` runs on the same
+~24 MHz timebase, and the PMU requires entitlements unavailable to an
+unprivileged process. Batching is the correct approach on this platform,
+not a fallback.
+
+### Fix
+
+Time a batch of 128 events with one pair of clock reads and divide.
+Median batch duration is now about 3,958 ns, roughly 96 ticks, well
+clear of the resolution floor.
+
+The tradeoff is real and has to be stated plainly: this measures mean
+per-event cost within a batch, not the latency of any individual event.
+Batching smooths exactly the per-event tail that would be most
+interesting to see. What it buys is numbers that measure the code
+instead of the clock.
+
+The naive path is retained and printed alongside the batched results on
+every invocation, so the artifact stays visible instead of becoming
+folklore.
+
+### Validation
+
+Batch size was swept across a 1,024x range - 128, 512, 2,048, 8,192,
+32,768, and 131,072 events. p50 stayed within 1.1 ns across the entire
+sweep (29.62 to 30.75 ns/event), confirming that per-batch overhead is
+negligible and that a batch size of 128 costs nothing.
+
+The batched result also agrees with the independent aggregate benchmark
+at roughly 30 ns/event. The old method never did.
+
+### The evidence that settled it
+
+Across eight consecutive runs the true per-event cost moved from 27.67
+to 31.25 ns/event, a 13% swing. The naive p50 printed 41 or 42 ns on
+every one of those eight runs. A measurement that cannot detect a 13%
+change in the quantity it measures is not noisy, it is broken.
+
+In the final five-trial run the batched p95 of 39.39 ns/event came in
+below the naive p50 of 42 ns.
+
+### Cold start, found along the way
+
+The first invocation of a session runs 40-50% slow: 44.29 ns/event
+aggregate and 46.55 ns/event batched, against warm medians near 30. The
+in-process 10,000-event warm-up was only about 0.3 ms of work, far too
+short to cover the CPU frequency ramp. Warm-up was raised to 2,000,000
+events and the measurement protocol now discards the first process
+invocation entirely.
+
+Warm steady state is 28.6 to 32.6 ns/event with roughly 13% run-to-run
+spread. Cores cannot be pinned and frequency cannot be locked on this
+platform, so that spread is documented rather than engineered away.

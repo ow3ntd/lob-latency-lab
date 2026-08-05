@@ -7,7 +7,7 @@ A C++20 limit order book and matching engine built for measurable low-latency pe
 ## Highlights
 
 - **Flat cancellation scaling over tested depths.** Replaced O(n) vector shifting within a price level with an intrusive doubly-linked list backed by a contiguous slot pool. Current local synthetic measurements show approximately 14–18 ns median cancellation cost across 5,000 to 80,000 resting orders.
-- **Percentile latency, not just averages.** Dedicated benchmarks report p50 / p95 / p99 per-event latency alongside aggregate throughput. Historical baselines are retained with their implementation context in [`results/`](results/).
+- **Measurement that survives its own audit.** The latency benchmark originally reported a p50 of 42 ns — above the 29.5 ns aggregate mean, which is impossible for a single operation. The cause was clock resolution: every single-event sample was one or two ticks of a ~41.67 ns clock. The benchmark now times 128-event batches (~96 ticks per sample) and runs the old method alongside it on every invocation so the artifact stays visible. Historical baselines are retained with their implementation context in [`results/`](results/).
 - **Real-data validation path.** Parses LOBSTER message files and validates each local transition against the paired order-book snapshots. On the official AAPL Level-10 sample, 295,828 transitions matched exactly, 104,562 were conservatively classified as unverifiable tail refills, and zero observable mismatches were found.
 - **Engineering process on record.** A [development log](docs/devlog.md) documents design decisions, including a cancellation optimization that was benchmarked, found slower, reverted, re-diagnosed, and then redesigned correctly.
 
@@ -59,9 +59,9 @@ uncontrolled.
 |---|---:|
 | Aggregate throughput | ~33.9M events/s |
 | Aggregate average cost | ~29.5 ns/event |
-| Per-event p50 latency | 42 ns |
-| Per-event p95 latency | 83 ns |
-| Per-event p99 latency | 84 ns |
+| Batched per-event cost, p50 | 30.92 ns/event (29.95–31.57) |
+| Batched per-event cost, p95 | 39.39 ns/event (32.55–39.71) |
+| Batched per-event cost, p99 | 47.20 ns/event (38.41–54.37) |
 | Cancellation cost, 5,000–80,000 resting orders | ~14–18 ns median |
 
 These results characterize deterministic workloads on one local machine. They
