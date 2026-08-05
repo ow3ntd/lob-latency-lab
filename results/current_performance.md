@@ -121,6 +121,12 @@ book.
 ## Percentile Latency
 
 Each trial timed 100,000 events individually.
+> **Superseded — measurement artifact.** The percentiles in this section are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`../docs/devlog.md`](../docs/devlog.md).
+
 
 ### Raw trials
 

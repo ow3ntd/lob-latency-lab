@@ -39,6 +39,12 @@ Methodology:
 | Per-event latency, 100,000 events | p95 | 83 ns | 42–83 ns |
 | Per-event latency, 100,000 events | p99 | 84 ns | 84–84 ns |
 | Per-event latency, 100,000 events | Maximum | 22,416 ns | 15,250–30,666 ns |
+> **Superseded — measurement artifact.** The per-event latency rows above are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`../docs/devlog.md`](../docs/devlog.md).
+
 
 ### Current Cancellation Scaling
 
@@ -100,6 +106,12 @@ Command:
 | p95 latency | ~84 ns |
 | p99 latency | 84 ns |
 | Worst max latency observed | 30,083 ns |
+> **Superseded — measurement artifact.** The latency figures above are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`../docs/devlog.md`](../docs/devlog.md).
+
 
 ### Notes
 

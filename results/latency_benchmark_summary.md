@@ -30,6 +30,12 @@ Trades generated per run: 25,000
 | 1 | 100,000 | 25,000 | 42 ns | 83 ns | 84 ns | 16,875 ns |
 | 2 | 100,000 | 25,000 | 42 ns | 84 ns | 84 ns | 16,250 ns |
 | 3 | 100,000 | 25,000 | 42 ns | 84 ns | 84 ns | 30,083 ns |
+> **Superseded — measurement artifact.** The percentiles in this table are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`../docs/devlog.md`](../docs/devlog.md).
+
 
 ## Result Summary
 
@@ -39,6 +45,12 @@ Across three runs, the benchmark reported:
 - p95 latency: approximately 84 ns
 - p99 latency: approximately 84 ns
 - worst observed max latency: 30,083 ns
+> **Superseded — measurement artifact.** The percentiles above are clock
+> quantization, not measurements. This machine's monotonic clock ticks at
+> ~41.67 ns while the operation costs ~30 ns, so every single-event sample
+> was one tick (42 ns) or two (83–84 ns). The benchmark now times
+> 128-event batches. See the 2026-07-30 entry in [`../docs/devlog.md`](../docs/devlog.md).
+
 
 ## Measurement Limitations
 
