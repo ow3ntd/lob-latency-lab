@@ -84,6 +84,25 @@ pool's O(1) unlink operation. The complete cancellation API also performs
 identifier and price-map lookups, so it is not claimed to be mathematically
 constant-time in every component.
 
+### Cancellation scaling (current)
+
+`bench_cancel_stress` rests N orders at one price level and cancels
+them front-to-back — the worst case for a position-shifting cancel.
+
+| Resting orders | Median cancel | Observed range |
+|---:|---:|---:|
+| 5,000  | 15.73 ns | 13.93–20.39 |
+| 10,000 | 16.26 ns | 14.00–17.20 |
+| 20,000 | 15.40 ns | 13.43–17.02 |
+| 40,000 | 13.77 ns | 13.22–14.24 |
+| 80,000 | 15.81 ns | 14.37–16.88 |
+
+Five measured trials per depth. The 2.5 ns spread across a 16x change
+in depth is smaller than the run-to-run spread within any single depth
+— on this machine, book depth is not the variable that moves this
+number. Wider ranges at shallow depths reflect process warm-up: 5,000
+runs first inside each invocation.
+
 ### Historical cancellation scaling (2026-07-07)
 
 `bench_cancel_stress` rests N orders at one price level and cancels all of them front-to-back — the worst case for a position-shifting cancel.
@@ -96,7 +115,7 @@ constant-time in every component.
 | 40,000 | ~15,858 ns | ~27 ns |
 | 80,000 | ~46,703 ns | ~26 ns |
 
-The old cost doubles as the book doubles (the O(n) signature); the new cost is flat. The speedup grows with depth — ~68x at 5,000 orders to ~1,760x at 80,000 — which is what removing an algorithmic bottleneck looks like, rather than a constant-factor tweak.
+The old cost tracks book depth linearly through 40,000 (2.02x, 2.00x, 2.00x per doubling), then jumps 2.94x from 40,000 to 80,000 — the shifted region outgrows a cache level and the memmove goes superlinear. The new cost is flat throughout. The speedup grows with depth, ~68x at 5,000 orders to ~1,760x at 80,000 — what removing an algorithmic bottleneck looks like, rather than a constant-factor tweak.
 
 ### Historical aggregate baseline
 
