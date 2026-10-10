@@ -256,9 +256,16 @@ ParsedLobsterMessage parse_lobster_message(
     };
 }
 
+void validate_transition_message_semantics(const ParsedLobsterMessage& message,
+                                             std::size_t row);
+
 void apply_lobster_message(const ParsedLobsterMessage& message,
                            std::size_t row, OrderBook& book,
                            LobsterSummary& summary) {
+
+    // Enforce the same semantics as the transition validator: the replay path
+    // must not silently apply rows that corrupt the book or the summary.
+    validate_transition_message_semantics(message, row);
 
     ++summary.events_processed;
 
@@ -330,7 +337,18 @@ void apply_lobster_message_line(const std::string& line, std::size_t row,
 void validate_transition_message_semantics(const ParsedLobsterMessage& message,
                                            std::size_t row) {
     switch (message.type) {
-        case 1: case 2: case 3: case 4:
+        case 1:
+            if (message.direction != 1 && message.direction != -1) {
+                throw malformed_row(row, "invalid direction");
+            }
+            if (message.size <= 0) {
+                throw malformed_row(row, "quantity must be positive");
+            }
+            if (message.price <= 0) {
+                throw malformed_row(row, "price must be positive");
+            }
+            break;
+        case 2: case 3: case 4:
             if (message.direction != 1 && message.direction != -1) {
                 throw malformed_row(row, "invalid direction");
             }
