@@ -77,6 +77,57 @@ void test_replay_market_data_summary_and_book_state() {
     CHECK(!book.best_bid().has_value());
 }
 
+void check_lobster_replay_fails(
+    std::string_view messages,
+    std::string_view expected_message
+) {
+    std::istringstream input{std::string(messages)};
+    lob::OrderBook book;
+    bool threw = false;
+
+    try {
+        static_cast<void>(lob::replay_lobster_data(input, book));
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        CHECK(
+            std::string_view(error.what()).find(expected_message) !=
+            std::string_view::npos
+        );
+    }
+
+    CHECK(threw);
+}
+
+void test_lobster_replay_rejects_non_positive_price() {
+    check_lobster_replay_fails(
+        "34200.000000001,1,100,10,-500,1\n", "price must be positive"
+    );
+    check_lobster_replay_fails(
+        "34200.000000001,1,100,10,0,1\n", "price must be positive"
+    );
+
+    std::istringstream input("34200.000000001,1,100,10,-500,1\n");
+    lob::OrderBook book;
+    try {
+        static_cast<void>(lob::replay_lobster_data(input, book));
+    } catch (const std::runtime_error&) {
+    }
+    CHECK(book.order_count() == 0);
+    CHECK(!book.best_bid().has_value());
+}
+
+void test_lobster_replay_rejects_non_positive_size() {
+    check_lobster_replay_fails(
+        "34200.000000001,1,100,-10,10050,1\n", "quantity must be positive"
+    );
+    check_lobster_replay_fails(
+        "34200.000000001,2,100,-5,10050,1\n", "quantity must be positive"
+    );
+    check_lobster_replay_fails(
+        "34200.000000001,4,100,-5,10050,1\n", "quantity must be positive"
+    );
+}
+
 void test_lobster_partial_cancel_subtracts_event_quantity() {
     std::istringstream input(
         "34200.000000001,1,1,10,10050,1\n"
@@ -718,6 +769,8 @@ int main() {
     test_lobster_visible_execution_exhausts_order();
     test_lobster_cross_trade_does_not_mutate_visible_book();
     test_lobster_unsuccessful_reductions_are_not_counted();
+    test_lobster_replay_rejects_non_positive_price();
+    test_lobster_replay_rejects_non_positive_size();
     test_parse_lobster_book_row_one_valid_level();
     test_parse_lobster_book_row_preserves_level_order();
     test_parse_lobster_book_row_one_side_empty();
